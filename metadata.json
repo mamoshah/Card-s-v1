@@ -1,0 +1,6 @@
+{
+  "name": "card's V.2",
+  "description": "Fast motion optical-flow object tracking app for playing cards, rapid shuffles, and occlusion diagnostics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
