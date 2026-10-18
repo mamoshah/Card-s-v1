@@ -92,10 +92,10 @@ object BenchmarkVideoProvider {
      */
     fun getGroundTruthFinalSlot(benchmarkId: String): String {
         return when (benchmarkId) {
-            "classic_monte" -> "Left Position" // Starts Center -> swaps with Left -> swaps with Right -> ends Left
-            "occlusion_monte" -> "Right Position" // Starts Center -> swaps with Right -> ends Right
-            "rapid_cross_monte" -> "Middle Position" // Complex 3 swaps, ends back in Middle
-            else -> "Left Position"
+            "classic_monte" -> "Position 1 (Left)" // Starts Center -> swaps with Left -> swaps with Right -> ends Left
+            "occlusion_monte" -> "Position 3 (Right)" // Starts Center -> swaps with Right -> ends Right
+            "rapid_cross_monte" -> "Position 2 (Middle)" // Complex 3 swaps, ends back in Middle
+            else -> "Position 1 (Left)"
         }
     }
 

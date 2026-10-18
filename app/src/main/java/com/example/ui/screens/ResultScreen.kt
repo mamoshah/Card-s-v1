@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -22,7 +23,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -31,6 +35,7 @@ import com.example.model.ConfidenceLevel
 import com.example.model.TrackingResult
 import com.example.model.TrailEffectStyle
 import com.example.model.TrailLengthMode
+import com.example.ui.components.KinematicsDiagnosticsSection
 import com.example.ui.components.TrajectoryTrailOverlay
 import com.example.ui.theme.*
 import com.example.viewmodel.ScrubberPlaybackState
@@ -52,7 +57,6 @@ fun ResultScreen(
     onRerun: () -> Unit,
     onResetToUpload: () -> Unit
 ) {
-    var showDiagnosticDetails by remember { mutableStateOf(false) }
 
     val currentFrameIndex = playbackState.currentFrameIndex.coerceIn(0, result.trackedFrames.size - 1)
     val currentTrackedFrame = result.trackedFrames[currentFrameIndex]
@@ -206,7 +210,7 @@ fun ResultScreen(
                                 trackedFrames = result.trackedFrames,
                                 currentFrameIndex = currentFrameIndex,
                                 trailEffect = playbackState.trailEffect,
-                                trailLength = playbackState.trailLength,
+                                trailLength = TrailLengthMode.FULL,
                                 showBoundingBox = playbackState.showBoundingBox,
                                 showArrow = playbackState.showArrow,
                                 showTelemetryHud = playbackState.showTelemetryHud,
@@ -291,15 +295,17 @@ fun ResultScreen(
                             }
                         }
 
-                        // Style selector chips
-                        val scrollState = rememberScrollState()
+                        // Style selector chips: only Speed Heatmap and Classic Arrow
+                        val allowedEffects = listOf(
+                            TrailEffectStyle.SPEED_HEATMAP,
+                            TrailEffectStyle.CLASSIC_ARROW
+                        )
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(scrollState),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TrailEffectStyle.values().forEach { style ->
+                            allowedEffects.forEach { style ->
                                 val isSelected = playbackState.trailEffect == style
                                 FilterChip(
                                     selected = isSelected,
@@ -307,7 +313,7 @@ fun ResultScreen(
                                     label = {
                                         Text(
                                             text = "${style.titleAr} (${style.titleEn})",
-                                            fontSize = 11.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                         )
                                     },
@@ -319,37 +325,10 @@ fun ResultScreen(
                                     )
                                 )
                             }
-                        }
 
-                        // Trail duration & Overlays row
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Duration Mode
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Window:", fontSize = 11.sp, color = TextMuted)
-                                TrailLengthMode.values().forEach { mode ->
-                                    val isSelected = playbackState.trailLength == mode
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = { onTrailLengthChange(mode) },
-                                        label = { Text(mode.labelAr, fontSize = 10.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
-                                            selectedLabelColor = NeonCyan,
-                                            containerColor = DarkSurfaceElevated,
-                                            labelColor = TextMuted
-                                        )
-                                    )
-                                }
-                            }
+                            Spacer(modifier = Modifier.weight(1f))
 
-                            // Overlays toggles
+                            // Overlays toggles (+ indicator, Arrow, Telemetry HUD)
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -359,10 +338,10 @@ fun ResultScreen(
                                     modifier = Modifier.size(34.dp)
                                 ) {
                                     Icon(
-                                        Icons.Default.CropFree,
-                                        contentDescription = "Target Box",
-                                        tint = if (playbackState.showBoundingBox) NeonCyan else TextMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        Icons.Default.Add,
+                                        contentDescription = "مؤشر التتبع (+)",
+                                        tint = if (playbackState.showBoundingBox) Color(0xFF4C0043) else TextMuted,
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                                 IconButton(
@@ -506,108 +485,10 @@ fun ResultScreen(
 
             // 5. Engine Diagnostics & Kinematics Dashboard
             item {
-                Surface(
-                    color = DarkSurface,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, DarkSurfaceBorder)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(Icons.Default.Analytics, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
-                                Text(
-                                    text = "Kinematics & Diagnostics • القياسات الحركية",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = TextPrimary
-                                )
-                            }
-
-                            TextButton(onClick = { showDiagnosticDetails = !showDiagnosticDetails }) {
-                                Text(if (showDiagnosticDetails) "Hide Log" else "Show Log", fontSize = 12.sp, color = NeonCyan)
-                            }
-                        }
-
-                        // Metric Pills Row 1: Kinematics
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            DiagnosticMetricPill(
-                                label = "PEAK SPEED",
-                                value = "${String.format("%.1f", result.peakSpeed * 30)} scr/s",
-                                modifier = Modifier.weight(1f)
-                            )
-                            DiagnosticMetricPill(
-                                label = "DISPLACEMENT",
-                                value = "${String.format("%.2f", result.totalDistanceTraveled)}x",
-                                modifier = Modifier.weight(1f)
-                            )
-                            DiagnosticMetricPill(
-                                label = "OCCLUSIONS",
-                                value = "${result.occlusionEventsCount}",
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        // Metric Pills Row 2: Performance
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            DiagnosticMetricPill(
-                                label = "TOTAL FRAMES",
-                                value = "${result.totalFrames}",
-                                modifier = Modifier.weight(1f)
-                            )
-                            DiagnosticMetricPill(
-                                label = "ENGINE FPS",
-                                value = "${String.format("%.1f", result.processingFps)}",
-                                modifier = Modifier.weight(1f)
-                            )
-                            DiagnosticMetricPill(
-                                label = "CONFIDENCE",
-                                value = "${(result.averageConfidence * 100).toInt()}%",
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        // Collapsible Diagnostic Log
-                        AnimatedVisibility(visible = showDiagnosticDetails) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 8.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(DarkBackground)
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                result.diagnosticNotes.forEach { note ->
-                                    Text(
-                                        text = "• $note",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 11.sp
-                                        ),
-                                        color = TextSecondary
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+                KinematicsDiagnosticsSection(
+                    result = result,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             // 6. Action Buttons
@@ -672,38 +553,6 @@ fun ResultScreen(
                 }
                 Spacer(modifier = Modifier.height(20.dp))
             }
-        }
-    }
-}
-
-@Composable
-private fun DiagnosticMetricPill(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = DarkSurfaceElevated,
-        shape = RoundedCornerShape(10.dp),
-        modifier = modifier
-    ) {
-        Column(
-            modifier = Modifier.padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Text(
-                text = label,
-                fontSize = 9.sp,
-                fontFamily = FontFamily.Monospace,
-                color = TextMuted
-            )
-            Text(
-                text = value,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Black,
-                fontFamily = FontFamily.Monospace,
-                color = TextPrimary
-            )
         }
     }
 }

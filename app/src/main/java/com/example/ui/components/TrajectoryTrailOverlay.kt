@@ -87,10 +87,10 @@ fun TrajectoryTrailOverlay(
             }
         }
 
-        // 2. Draw Target Bounding Box & Tactical Reticle
-        if (showBoundingBox) {
-            drawTacticalBoundingBox(currentFrame, fitRect)
-        }
+        // 2. Persistent Tracking Indicator (+) in Plum (#4C0043)
+        // Independent, locked to card tracker center, permanently active in all cases (whether selection visibility is enabled or disabled).
+        // Blue selection rectangle, brackets, and side borders are eliminated completely.
+        drawTrackingCrosshairIndicator(currentFrame, fitRect)
 
         // 3. Draw Instantaneous Velocity Vector
         if (showTelemetryHud && currentFrame.speed > 0.004f) {
@@ -422,62 +422,72 @@ private fun DrawScope.drawWaypointsTrail(
 }
 
 /**
- * Tactical Bounding Box with Corner Brackets
+ * Dedicated Card Tracking Crosshair Indicator (+)
+ * - Rendered independently without any rectangular frame or side brackets.
+ * - Permanently fixed and tracking the target card center (cx, cy).
+ * - Styled in deep Plum (#4C0043) with high-contrast subtle outline for optimal visibility.
+ * - Active permanently across all situations (whether selection visibility is toggled on or off).
  */
-private fun DrawScope.drawTacticalBoundingBox(
+private fun DrawScope.drawTrackingCrosshairIndicator(
     frame: TrackedFrame,
     fitRect: Rect
 ) {
-    val boxL = fitRect.left + frame.rect.left * fitRect.width
-    val boxT = fitRect.top + frame.rect.top * fitRect.height
-    val boxW = frame.rect.width * fitRect.width
-    val boxH = frame.rect.height * fitRect.height
+    val cx = fitRect.left + frame.center.x * fitRect.width
+    val cy = fitRect.top + frame.center.y * fitRect.height
 
-    val statusColor = when {
-        frame.isOccluded -> Color(0xFFFFAB00)
-        frame.confidence >= 0.55f -> Color(0xFF00E5FF)
-        else -> Color(0xFFFF5252)
-    }
+    val plumColor = Color(0xFF4C0043)
+    val crossLen = 8.dp.toPx()
+    val strokeWidth = 2.5.dp.toPx()
 
-    drawRoundRect(
-        color = statusColor.copy(alpha = 0.08f),
-        topLeft = Offset(boxL, boxT),
-        size = Size(boxW, boxH),
-        cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
+    // 1. High-contrast clean halo/outline so the Plum crosshair is clearly distinguishable
+    // on both light cards and dark felt surfaces
+    val outlineWidth = strokeWidth + 1.6.dp.toPx()
+    val outlineColor = Color.White.copy(alpha = 0.70f)
+
+    // Contrast outline
+    drawLine(
+        color = outlineColor,
+        start = Offset(cx - crossLen - 0.5.dp.toPx(), cy),
+        end = Offset(cx + crossLen + 0.5.dp.toPx(), cy),
+        strokeWidth = outlineWidth,
+        cap = StrokeCap.Round
+    )
+    drawLine(
+        color = outlineColor,
+        start = Offset(cx, cy - crossLen - 0.5.dp.toPx()),
+        end = Offset(cx, cy + crossLen + 0.5.dp.toPx()),
+        strokeWidth = outlineWidth,
+        cap = StrokeCap.Round
     )
 
-    val bracketLen = min(boxW, boxH) * 0.28f
-    val strokeW = 2.5.dp.toPx()
+    // 2. Primary Plum (#4C0043) Crosshair (+)
+    drawLine(
+        color = plumColor,
+        start = Offset(cx - crossLen, cy),
+        end = Offset(cx + crossLen, cy),
+        strokeWidth = strokeWidth,
+        cap = StrokeCap.Round
+    )
+    drawLine(
+        color = plumColor,
+        start = Offset(cx, cy - crossLen),
+        end = Offset(cx, cy + crossLen),
+        strokeWidth = strokeWidth,
+        cap = StrokeCap.Round
+    )
 
-    // 1. Top-Left Bracket
-    drawLine(statusColor, Offset(boxL, boxT + bracketLen), Offset(boxL, boxT), strokeW, StrokeCap.Square)
-    drawLine(statusColor, Offset(boxL, boxT), Offset(boxL + bracketLen, boxT), strokeW, StrokeCap.Square)
-
-    // 2. Top-Right Bracket
-    val boxR = boxL + boxW
-    drawLine(statusColor, Offset(boxR - bracketLen, boxT), Offset(boxR, boxT), strokeW, StrokeCap.Square)
-    drawLine(statusColor, Offset(boxR, boxT), Offset(boxR, boxT + bracketLen), strokeW, StrokeCap.Square)
-
-    // 3. Bottom-Left Bracket
-    val boxB = boxT + boxH
-    drawLine(statusColor, Offset(boxL, boxB - bracketLen), Offset(boxL, boxB), strokeW, StrokeCap.Square)
-    drawLine(statusColor, Offset(boxL, boxB), Offset(boxL + bracketLen, boxB), strokeW, StrokeCap.Square)
-
-    // 4. Bottom-Right Bracket
-    drawLine(statusColor, Offset(boxR - bracketLen, boxB), Offset(boxR, boxB), strokeW, StrokeCap.Square)
-    drawLine(statusColor, Offset(boxR, boxB), Offset(boxR, boxB - bracketLen), strokeW, StrokeCap.Square)
-
-    // Center crosshair
-    val cx = boxL + boxW / 2f
-    val cy = boxT + boxH / 2f
-    val crossLen = 5.dp.toPx()
-
-    drawLine(statusColor.copy(alpha = 0.7f), Offset(cx - crossLen, cy), Offset(cx + crossLen, cy), 1.5.dp.toPx())
-    drawLine(statusColor.copy(alpha = 0.7f), Offset(cx, cy - crossLen), Offset(cx, cy + crossLen), 1.5.dp.toPx())
+    // Small crisp precision center point in Plum
+    drawCircle(
+        color = plumColor,
+        radius = 2.dp.toPx(),
+        center = Offset(cx, cy)
+    )
 }
 
 /**
- * Instantaneous Velocity Vector arrow
+ * Instantaneous Horizontal Tracking Vector Arrow (السهم الأصفر لمؤشر الرصد)
+ * Constrained strictly to horizontal axis (Right / Left only).
+ * Zero vertical component or upward deviation.
  */
 private fun DrawScope.drawVelocityVector(
     frame: TrackedFrame,
@@ -487,46 +497,61 @@ private fun DrawScope.drawVelocityVector(
     val cy = fitRect.top + frame.center.y * fitRect.height
 
     val vxNorm = frame.velocityX
-    val vyNorm = frame.velocityY
-    val speedNorm = sqrt(vxNorm * vxNorm + vyNorm * vyNorm)
-    if (speedNorm < 0.003f) return
+    val absVx = kotlin.math.abs(vxNorm)
+    if (absVx < 0.002f && frame.speed < 0.002f) return
 
-    val angle = atan2(vyNorm, vxNorm)
-    val vecLength = (speedNorm * fitRect.width * 3.5f).coerceIn(16.dp.toPx(), 60.dp.toPx())
+    val isMovingRight = vxNorm >= 0f
+    val dir = if (isMovingRight) 1f else -1f
+    val effectiveSpeed = max(absVx, frame.speed)
+    val vecLength = (effectiveSpeed * fitRect.width * 3.5f).coerceIn(18.dp.toPx(), 65.dp.toPx())
 
-    val targetX = cx + cos(angle) * vecLength
-    val targetY = cy + sin(angle) * vecLength
+    val targetX = cx + dir * vecLength
+    val targetY = cy // Strictly horizontal Y - perfectly aligned with horizontal track center!
 
+    // Shadow line for high contrast
+    drawLine(
+        color = Color(0xDD000000),
+        start = Offset(cx, cy),
+        end = Offset(targetX, targetY),
+        strokeWidth = 5.dp.toPx(),
+        cap = StrokeCap.Round
+    )
+
+    // Main vibrant yellow arrow body (مؤشر الرصد - السهم الأصفر)
     drawLine(
         color = Color(0xFFFFD600),
         start = Offset(cx, cy),
         end = Offset(targetX, targetY),
-        strokeWidth = 2.5.dp.toPx(),
+        strokeWidth = 3.2.dp.toPx(),
         cap = StrokeCap.Round
     )
 
-    val tipLen = 9.dp.toPx()
-    val tipAngle1 = angle + 2.5f
-    val tipAngle2 = angle - 2.5f
+    val tipLenX = 12.dp.toPx()
+    val tipLenY = 8.dp.toPx()
 
-    drawLine(
-        color = Color(0xFFFFD600),
-        start = Offset(targetX, targetY),
-        end = Offset(targetX + cos(tipAngle1) * tipLen, targetY + sin(tipAngle1) * tipLen),
-        strokeWidth = 2.5.dp.toPx(),
-        cap = StrokeCap.Round
+    val arrowHeadPath = Path().apply {
+        moveTo(targetX, targetY)
+        lineTo(targetX - dir * tipLenX, targetY - tipLenY)
+        lineTo(targetX - dir * (tipLenX * 0.65f), targetY)
+        lineTo(targetX - dir * tipLenX, targetY + tipLenY)
+        close()
+    }
+
+    drawPath(
+        path = arrowHeadPath,
+        color = Color(0xDD000000),
+        style = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
     )
-    drawLine(
-        color = Color(0xFFFFD600),
-        start = Offset(targetX, targetY),
-        end = Offset(targetX + cos(tipAngle2) * tipLen, targetY + sin(tipAngle2) * tipLen),
-        strokeWidth = 2.5.dp.toPx(),
-        cap = StrokeCap.Round
+
+    drawPath(
+        path = arrowHeadPath,
+        color = Color(0xFFFFD600)
     )
 }
 
 /**
- * Large downward green arrow pointing to the detected card
+ * Large downward green arrow pointing to the detected card with downward Y-Axis Clamp Boundary.
+ * Ensures arrow tip NEVER descends below the horizontal green boundary clamp line.
  */
 private fun DrawScope.drawDownwardGreenArrow(
     frame: TrackedFrame,
@@ -535,12 +560,29 @@ private fun DrawScope.drawDownwardGreenArrow(
     val centerX = fitRect.left + frame.center.x * fitRect.width
     val cardTopY = fitRect.top + frame.rect.top * fitRect.height
 
-    val arrowTipY = (cardTopY - 4.dp.toPx()).coerceAtLeast(fitRect.top + 28.dp.toPx())
+    // Y-Axis Clamp Boundary (الخط الأخضر الأفقي المحدد)
+    // The downward boundary prevents the green arrow tip from descending below the boundary line
+    val maxDownwardBoundaryY = fitRect.top + fitRect.height * 0.365f
+    val minTopY = fitRect.top + 28.dp.toPx()
+
+    // Clamp arrow tip so it strictly respects the downward boundary limit
+    val desiredTipY = cardTopY - 4.dp.toPx()
+    val arrowTipY = desiredTipY.coerceIn(minTopY, maxDownwardBoundaryY)
+
     val arrowHeadHeight = 22.dp.toPx()
     val arrowHeadWidth = 38.dp.toPx()
     val shaftWidth = 14.dp.toPx()
     val arrowHeadBaseY = arrowTipY - arrowHeadHeight
     val shaftTopY = (arrowHeadBaseY - 32.dp.toPx()).coerceAtLeast(fitRect.top + 6.dp.toPx())
+
+    // Draw subtle horizontal boundary limit line across the tracking corridor
+    drawLine(
+        color = Color(0x7700E676),
+        start = Offset(fitRect.left + 8.dp.toPx(), maxDownwardBoundaryY),
+        end = Offset(fitRect.right - 8.dp.toPx(), maxDownwardBoundaryY),
+        strokeWidth = 1.5.dp.toPx(),
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+    )
 
     val arrowPath = Path().apply {
         moveTo(centerX, arrowTipY)

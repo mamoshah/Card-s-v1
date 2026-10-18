@@ -73,6 +73,7 @@ enum class ConfidenceLevel {
 enum class TrackingState {
     TRACKING_LOCKED,
     OCCLUDED_COASTING,
+    OCCLUSION_STACK,
     REACQUIRING,
     LOST
 }
@@ -118,6 +119,173 @@ data class TrackedFrame(
 )
 
 /**
+ * Strict screen positions for card tracking & shuffles:
+ *  - Position 1 = Left (اليسار)
+ *  - Position 2 = Middle / Center (الوسط)
+ *  - Position 3 = Right (اليمين)
+ */
+enum class CardPosition(val id: Int, val nameEn: String, val nameAr: String) {
+    LEFT(1, "Left", "اليسار"),
+    MIDDLE(2, "Middle", "الوسط"),
+    RIGHT(3, "Right", "اليمين");
+
+    val shortLabel: String get() = "Pos $id"
+    val displayLabel: String get() = "Position $id ($nameEn)"
+
+    val defaultCenterX: Float
+        get() = when (this) {
+            LEFT -> 0.43f
+            MIDDLE -> 0.57f
+            RIGHT -> 0.71f
+        }
+
+    val defaultCenterY: Float get() = 0.65f
+
+    /**
+     * Relative coordinates anchored directly over the game cards inside active video frame:
+     *  - Card 1 (Left): Relative X [0.36 .. 0.50], Y [0.45 .. 0.85]
+     *  - Card 2 (Middle): Relative X [0.50 .. 0.64], Y [0.45 .. 0.85]
+     *  - Card 3 (Right): Relative X [0.64 .. 0.78], Y [0.45 .. 0.85]
+     */
+    fun getPreconfiguredRect(): NormalizedRect {
+        return when (this) {
+            LEFT -> NormalizedRect(left = 0.36f, top = 0.45f, right = 0.50f, bottom = 0.85f)
+            MIDDLE -> NormalizedRect(left = 0.50f, top = 0.45f, right = 0.64f, bottom = 0.85f)
+            RIGHT -> NormalizedRect(left = 0.64f, top = 0.45f, right = 0.78f, bottom = 0.85f)
+        }
+    }
+
+    companion object {
+        fun fromId(id: Int): CardPosition = when (id) {
+            1 -> LEFT
+            3 -> RIGHT
+            else -> MIDDLE
+        }
+
+        /**
+         * Resolves position by normalized X coordinate:
+         * Card 1: < 0.50
+         * Card 2: 0.50 .. 0.64
+         * Card 3: >= 0.64
+         */
+        fun fromX(x: Float): CardPosition = when {
+            x < 0.50f -> LEFT
+            x in 0.50f..0.64f -> MIDDLE
+            else -> RIGHT
+        }
+
+        /**
+         * Hit-tests whether a video-relative coordinate (relX, relY) falls directly inside
+         * a card bounding box or its top guidance indicator box.
+         */
+        fun findPositionAt(relX: Float, relY: Float): CardPosition? {
+            for (pos in entries) {
+                val rect = pos.getPreconfiguredRect()
+                // Check if inside card bounds or within top guidance box region (relY from 0.25 to 0.85)
+                if (relX in rect.left..rect.right && relY in 0.25f..rect.bottom) {
+                    return pos
+                }
+            }
+            return null
+        }
+
+        /**
+         * Transition with hysteresis deadbands to suppress jitter
+         */
+        fun transition(current: CardPosition, x: Float): CardPosition {
+            return when (current) {
+                LEFT -> when {
+                    x > 0.64f -> RIGHT
+                    x > 0.52f -> MIDDLE
+                    else -> LEFT
+                }
+                MIDDLE -> when {
+                    x < 0.48f -> LEFT
+                    x > 0.66f -> RIGHT
+                    else -> MIDDLE
+                }
+                RIGHT -> when {
+                    x < 0.48f -> LEFT
+                    x < 0.62f -> MIDDLE
+                    else -> RIGHT
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Structured log entry for detected card position transitions
+ */
+data class CardMoveLog(
+    val moveNumber: Int,
+    val fromPosition: CardPosition,
+    val toPosition: CardPosition,
+    val frameIndex: Int,
+    val timestampMs: Long,
+    val confidence: Float = 1.0f,
+    val speed: Float = 0f
+) {
+    fun toFormattedString(): String {
+        val seconds = timestampMs / 1000f
+        val timeFormatted = String.format(java.util.Locale.US, "%.2fs", seconds)
+        return "• Move $moveNumber: Card moved [${fromPosition.shortLabel} -> ${toPosition.shortLabel}] | Frame $frameIndex ($timeFormatted)"
+    }
+
+    fun toAnalyticalString(): String {
+        val totalSeconds = timestampMs / 1000f
+        val minutes = (totalSeconds / 60).toInt()
+        val seconds = totalSeconds % 60
+        val timeFormatted = String.format(java.util.Locale.US, "%02d:%04.1fs", minutes, seconds)
+        val velocityFormatted = String.format(java.util.Locale.US, "%.2f", speed * 30f)
+        return "• Move $moveNumber: ${fromPosition.shortLabel} -> ${toPosition.shortLabel} | Frame $frameIndex (Time: $timeFormatted) | Velocity: $velocityFormatted"
+    }
+}
+
+/**
+ * High-resolution visual template and feature descriptor fingerprint
+ * captured at initial target lock (frame 0 / selection tap).
+ */
+data class TrackedTargetFingerprint(
+    val initialTargetRect: NormalizedRect,
+    val initialPosition: CardPosition,
+    val templateWidth: Int = 32,
+    val templateHeight: Int = 44,
+    val zeroMeanPatch: FloatArray,
+    val templateNorm: Float,
+    val meanBrightness: Float,
+    val isRedSuit: Boolean,
+    val isBlackSuit: Boolean,
+    val keyFeaturesCount: Int = 0,
+    val redPixelCount: Int = 0,
+    val darkPixelCount: Int = 0
+)
+
+/**
+ * Detailed record of a Fingerprint / Visual Template Matching re-acquisition event
+ */
+data class FingerprintUsageEvent(
+    val startFrame: Int,
+    val endFrame: Int,
+    val startTimestampMs: Long,
+    val endTimestampMs: Long,
+    val targetPosition: CardPosition,
+    val reason: String, // e.g. "Card Overlap / Center Stack", "Feature Loss", "Unstacking Separation"
+    val restoredPosition: CardPosition,
+    val confidenceScore: Float
+) {
+    val durationFrames: Int get() = maxOf(1, endFrame - startFrame + 1)
+    val durationMs: Long get() = maxOf(0L, endTimestampMs - startTimestampMs)
+
+    fun toDiagnosticString(): String {
+        val seconds = startTimestampMs / 1000f
+        val timeFormatted = String.format(java.util.Locale.US, "%02d:%04.1fs", (seconds / 60).toInt(), seconds % 60)
+        val confPercent = (confidenceScore * 100).toInt()
+        return "• Fingerprint Re-Acquisition: ${targetPosition.shortLabel} | Frame $startFrame-$endFrame (Time: $timeFormatted, ${durationFrames}f/${durationMs}ms) | Reason: $reason | Re-acquired at ${restoredPosition.shortLabel} (${restoredPosition.nameEn}) | Confidence: $confPercent%"
+    }
+}
+
+/**
  * Complete result output of the tracking engine
  */
 data class TrackingResult(
@@ -127,7 +295,7 @@ data class TrackingResult(
     val finalFrameIndex: Int,
     val finalRect: NormalizedRect,
     val finalCenter: NormalizedPoint,
-    val finalSlot: String, // e.g. "Left Position", "Middle Position", "Right Position"
+    val finalSlot: String, // e.g. "Position 2 (Middle)", "Position 1 (Left)", "Position 3 (Right)"
     val averageConfidence: Float,
     val confidenceLevel: ConfidenceLevel,
     val occlusionEventsCount: Int,
@@ -137,7 +305,10 @@ data class TrackingResult(
     val diagnosticNotes: List<String>,
     val totalDistanceTraveled: Float = 0f,
     val peakSpeed: Float = 0f,
-    val averageSpeed: Float = 0f
+    val averageSpeed: Float = 0f,
+    val moveHistory: List<CardMoveLog> = emptyList(),
+    val fingerprintEvents: List<FingerprintUsageEvent> = emptyList(),
+    val targetFingerprint: TrackedTargetFingerprint? = null
 )
 
 /**

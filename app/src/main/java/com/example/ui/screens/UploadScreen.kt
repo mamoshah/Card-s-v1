@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -32,6 +33,11 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.engine.BenchmarkVideoProvider
 import com.example.model.BenchmarkVideo
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.example.R
+import com.example.data.local.UserEntity
 import com.example.ui.theme.*
 
 @Composable
@@ -40,7 +46,9 @@ fun UploadScreen(
     onBenchmarkSelected: (BenchmarkVideo) -> Unit,
     onVideoUploaded: (Uri, String) -> Unit,
     errorMessage: String?,
-    onDismissError: () -> Unit
+    onDismissError: () -> Unit,
+    currentUser: UserEntity? = null,
+    onLogout: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -148,59 +156,117 @@ fun UploadScreen(
         ) {
             item {
                 Spacer(modifier = Modifier.height(8.dp))
-                // App Brand Header
+                // App Brand Header with Mtsho Hunt Logo & User Logout
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(NeonCyan, NeonCyanDark)
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.FilterCenterFocus,
-                            contentDescription = "App Logo",
-                            tint = DarkBackground,
-                            modifier = Modifier.size(32.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .border(1.5.dp, CrimsonRed, RoundedCornerShape(14.dp))
+                                .background(BrandPitchBlack),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.img_login_brand_logo),
+                                contentDescription = "Mtsho Hunt Logo",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(14.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = "MTSHO HUNT",
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Black,
+                                        letterSpacing = 1.2.sp
+                                    ),
+                                    color = TextPrimary
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = DarkRedContainer,
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed.copy(alpha = 0.5f))
+                                ) {
+                                    Text(
+                                        text = "PRO CV",
+                                        color = NeonRedGlow,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Optical Flow Tracking & Occlusion Diagnostic",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
 
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "CARD'S V.2",
-                                style = MaterialTheme.typography.titleLarge.copy(
-                                    fontWeight = FontWeight.Black,
-                                    letterSpacing = 1.5.sp
-                                ),
-                                color = TextPrimary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
+                    // User Badge & Logout Button
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        if (currentUser != null) {
                             Surface(
-                                color = NeonCyan.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(6.dp)
+                                color = DarkSurfaceElevated,
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DarkRedBorder)
                             ) {
-                                Text(
-                                    text = "PRO CV",
-                                    color = NeonCyan,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = CrimsonRed,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = currentUser.displayName.ifBlank { currentUser.username },
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = TextPrimary,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
-                        Text(
-                            text = "Fast-Motion Optical Flow & Occlusion Diagnostic",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
+
+                        IconButton(
+                            onClick = onLogout,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DarkRedContainer)
+                                .border(1.dp, CrimsonRed.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .testTag("logout_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = "Logout",
+                                tint = NeonRedGlow,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -244,7 +310,7 @@ fun UploadScreen(
                         .border(
                             1.5.dp,
                             Brush.verticalGradient(
-                                listOf(NeonCyan.copy(alpha = 0.6f), DarkSurfaceBorder)
+                                listOf(CrimsonRed.copy(alpha = 0.7f), DarkRedBorder)
                             ),
                             RoundedCornerShape(20.dp)
                         )
@@ -267,13 +333,13 @@ fun UploadScreen(
                             modifier = Modifier
                                 .size(64.dp)
                                 .clip(CircleShape)
-                                .background(NeonCyan.copy(alpha = 0.12f)),
+                                .background(DarkRedContainer),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.CloudUpload,
                                 contentDescription = "Upload Icon",
-                                tint = NeonCyan,
+                                tint = NeonRedGlow,
                                 modifier = Modifier.size(36.dp)
                             )
                         }
@@ -298,16 +364,16 @@ fun UploadScreen(
                         ) {
                             listOf("ALL FORMATS", "MP4 / MKV", "H.264 / HEVC", "SCREEN RECS").forEach { badge ->
                                 Surface(
-                                    color = NeonCyan.copy(alpha = 0.08f),
+                                    color = DarkRedContainer.copy(alpha = 0.5f),
                                     shape = RoundedCornerShape(6.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.25f))
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed.copy(alpha = 0.35f))
                                 ) {
                                     Text(
                                         text = badge,
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
-                                        color = NeonCyan,
+                                        color = NeonRedGlow,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                     )
                                 }
@@ -326,8 +392,8 @@ fun UploadScreen(
                                     )
                                 },
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = NeonCyan,
-                                    contentColor = DarkBackground
+                                    containerColor = CrimsonRed,
+                                    contentColor = Color.White
                                 ),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier

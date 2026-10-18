@@ -7,8 +7,10 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.engine.BenchmarkVideoProvider
+import com.example.engine.CardMovementTracker
 import com.example.engine.OpticalFlowTracker
 import com.example.model.BenchmarkVideo
+import com.example.model.CardPosition
 import com.example.model.ConfidenceLevel
 import com.example.model.NormalizedPoint
 import com.example.model.NormalizedRect
@@ -39,17 +41,10 @@ data class TargetSelectionState(
     val firstFrame: Bitmap? = null,
     val selectedBox: NormalizedRect? = null,
     val selectedPoint: NormalizedPoint? = null,
-    val targetSizeScale: Float = 1.0f
+    val selectedPosition: CardPosition? = null
 )
 
 const val CARD_ASPECT_RATIO = 2.5f / 3.5f // Standard playing card ratio (width / height = 0.714)
-
-enum class TargetSizeOption(val label: String, val scale: Float, val labelAr: String) {
-    SMALL("Small", 0.75f, "صغير"),
-    STANDARD("Standard", 1.0f, "قياسي"),
-    LARGE("Large", 1.30f, "كبير"),
-    EXTRA_LARGE("XL", 1.60f, "كبير جداً")
-}
 
 data class TrackingProgressState(
     val currentFrame: Int = 0,
@@ -66,7 +61,7 @@ data class ScrubberPlaybackState(
     val isPlaying: Boolean = false,
     val currentFrameIndex: Int = 0,
     val playbackSpeed: Float = 1.0f,
-    val trailEffect: TrailEffectStyle = TrailEffectStyle.NEON_GLOW,
+    val trailEffect: TrailEffectStyle = TrailEffectStyle.SPEED_HEATMAP,
     val trailLength: TrailLengthMode = TrailLengthMode.FULL,
     val showBoundingBox: Boolean = true,
     val showArrow: Boolean = true,
@@ -141,12 +136,13 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
 
             if (frames.isNotEmpty()) {
                 val first = frames.first()
-                val defaultBox = BenchmarkVideoProvider.getInitialTargetBox(benchmark.id)
+                val defaultPos = CardPosition.MIDDLE
+                val defaultBox = defaultPos.getPreconfiguredRect()
                 _selectionState.value = TargetSelectionState(
                     firstFrame = first,
                     selectedBox = defaultBox,
                     selectedPoint = NormalizedPoint(defaultBox.centerX, defaultBox.centerY),
-                    targetSizeScale = 1.0f
+                    selectedPosition = defaultPos
                 )
                 _currentScreen.value = AppScreen.SELECT_TARGET
             } else {
@@ -191,20 +187,15 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                     return@launch
                 }
 
-                // Default card box centered on frame with fixed playing card aspect ratio
-                val cardWidth = 0.20f
-                val cardHeight = (cardWidth / CARD_ASPECT_RATIO).coerceAtMost(0.65f)
-                val defaultBox = NormalizedRect.fromCenter(
-                    NormalizedPoint(0.5f, 0.5f),
-                    cardWidth,
-                    cardHeight
-                )
+                // Default to Middle card (Position 2) using fixed 3-card grid layout
+                val defaultPos = CardPosition.MIDDLE
+                val defaultBox = defaultPos.getPreconfiguredRect()
 
                 _selectionState.value = TargetSelectionState(
                     firstFrame = firstFrame,
                     selectedBox = defaultBox,
-                    selectedPoint = NormalizedPoint(0.5f, 0.5f),
-                    targetSizeScale = 1.0f
+                    selectedPoint = NormalizedPoint(defaultBox.centerX, defaultBox.centerY),
+                    selectedPosition = defaultPos
                 )
                 loadedFrames = listOf(firstFrame)
 
@@ -220,54 +211,32 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /**
-     * User tapped on the first frame to select target position.
-     * Positions the fixed-size card bounding box directly centered on the tap point.
+     * Single-tap selection of one of the 3 fixed card positions
+     * (Position 1 = Left, Position 2 = Middle, Position 3 = Right).
      */
-    fun onFrameTapped(normalizedX: Float, normalizedY: Float) {
-        val tapPt = NormalizedPoint(normalizedX.coerceIn(0.05f, 0.95f), normalizedY.coerceIn(0.05f, 0.95f))
-        val current = _selectionState.value
-        val width = (0.20f * current.targetSizeScale).coerceIn(0.08f, 0.48f)
-        val height = (width / CARD_ASPECT_RATIO).coerceIn(0.12f, 0.70f)
-
-        val newBox = NormalizedRect.fromCenter(tapPt, width, height)
-        _selectionState.value = current.copy(
-            selectedPoint = tapPt,
-            selectedBox = newBox
-        )
-    }
-
-    /**
-     * User drew a custom ROI box (kept for compatibility).
-     */
-    fun onBoxDrawn(rect: NormalizedRect) {
-        val current = _selectionState.value
-        _selectionState.value = current.copy(
+    fun selectCardPosition(position: CardPosition) {
+        val rect = position.getPreconfiguredRect()
+        _selectionState.value = _selectionState.value.copy(
+            selectedPosition = position,
             selectedBox = rect,
             selectedPoint = NormalizedPoint(rect.centerX, rect.centerY)
         )
     }
 
     /**
-     * User adjusts the target size scale (Predefined Size option).
+     * User tapped on the frame: resolves the nearest card slot (Left, Middle, Right) and selects it.
      */
-    fun setTargetSizeScale(scale: Float) {
-        val current = _selectionState.value
-        val pt = current.selectedPoint ?: NormalizedPoint(0.5f, 0.5f)
-        val width = (0.20f * scale).coerceIn(0.08f, 0.48f)
-        val height = (width / CARD_ASPECT_RATIO).coerceIn(0.12f, 0.70f)
-        val newBox = NormalizedRect.fromCenter(pt, width, height)
-
-        _selectionState.value = current.copy(
-            targetSizeScale = scale,
-            selectedBox = newBox
-        )
+    fun onFrameTapped(normalizedX: Float, normalizedY: Float) {
+        val position = CardPosition.fromX(normalizedX)
+        selectCardPosition(position)
     }
 
     /**
-     * Alias for setTargetSizeScale to support legacy callers.
+     * Legacy ROI box support (maps box center to nearest card position).
      */
-    fun setBoxScale(scale: Float) {
-        setTargetSizeScale(scale)
+    fun onBoxDrawn(rect: NormalizedRect) {
+        val position = CardPosition.fromX(rect.centerX)
+        selectCardPosition(position)
     }
 
     /**
@@ -341,6 +310,9 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
             )
             trackedFrames.add(initialTracked)
 
+            val movementTracker = CardMovementTracker()
+            movementTracker.init(initialTracked)
+
             var occlusionCount = 0
             var prevOccluded = false
             var lostLock = false
@@ -351,6 +323,7 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                 val frameTimestamp = (i * 33L)
                 val tracked = tracker.processFrame(frameBmp, i, frameTimestamp)
                 trackedFrames.add(tracked)
+                movementTracker.processFrame(tracked)
 
                 if (tracked.isOccluded && !prevOccluded) {
                     occlusionCount++
@@ -406,18 +379,43 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                 else -> ConfidenceLevel.LOW
             }
 
-            // Estimate final resting slot
-            val finalSlot = determineSlot(finalFrame.center.x)
+            // Estimate final resting slot via movementTracker and position mapping
+            val finalSlot = movementTracker.getCurrentPosition().displayLabel
+            val moveHistory = movementTracker.getMoveHistory()
 
-            val diagnosticNotes = mutableListOf<String>()
-            diagnosticNotes.add("Processed ${trackedFrames.size} frames in ${totalDurationMs}ms (${String.format("%.1f", (trackedFrames.size * 1000f) / totalDurationMs)} FPS).")
-            diagnosticNotes.add("Final object coordinates: x=${(finalFrame.center.x * 100).toInt()}%, y=${(finalFrame.center.y * 100).toInt()}% ($finalSlot).")
-            diagnosticNotes.add("Trajectory Analysis: Total displacement ${(totalDistance * 100).toInt()}% screen, Peak speed ${String.format("%.2f", peakSpeed * 30)} screens/s.")
-            diagnosticNotes.add("Occlusion events handled: $occlusionCount.")
+            // Diagnostics and structured sequential movement log
+            val extraNotes = mutableListOf<String>()
             if (isUsingBenchmark && activeBenchmarkId != null) {
                 val groundTruth = BenchmarkVideoProvider.getGroundTruthFinalSlot(activeBenchmarkId!!)
-                diagnosticNotes.add("Benchmark Ground Truth: $groundTruth (Result matches: ${groundTruth == finalSlot}).")
+                extraNotes.add("Benchmark Ground Truth: $groundTruth (Result matches: ${groundTruth == finalSlot})")
             }
+
+            val processingFps = (trackedFrames.size * 1000f) / max(1L, totalDurationMs)
+            val firstFrame = trackedFrames.firstOrNull()
+            val initialXPercent = if (firstFrame != null) (firstFrame.center.x * 100).toInt() else 57
+            val initialYPercent = if (firstFrame != null) (firstFrame.center.y * 100).toInt() else 65
+            val targetLabel = _selectionState.value.selectedPosition?.displayLabel
+                ?: (firstFrame?.let { CardPosition.fromX(it.center.x).displayLabel } ?: "Position 2 (Middle)")
+            val initialCoords = "x=${initialXPercent}%, y=${initialYPercent}% (Target Locked)"
+            val confPercent = (avgConf * 100).toInt()
+            val totalDisplacementPercent = (totalDistance * 100).toInt()
+            val peakSpeedScreensPerSec = peakSpeed * 30f
+            val fingerprintEvents = tracker.getFingerprintEvents()
+            val targetFingerprint = tracker.getTargetFingerprint()
+
+            val diagnosticNotes = movementTracker.generateAiAnalyticalReport(
+                targetCardLabel = targetLabel,
+                initialCoordinates = initialCoords,
+                totalFrames = trackedFrames.size,
+                totalDurationMs = totalDurationMs,
+                processingFps = processingFps,
+                confidencePercent = confPercent,
+                peakSpeedScreensPerSec = peakSpeedScreensPerSec,
+                totalDisplacementPercent = totalDisplacementPercent,
+                occlusionEventsCount = occlusionCount,
+                fingerprintEvents = fingerprintEvents,
+                extraNotes = extraNotes
+            )
 
             val result = TrackingResult(
                 videoTitle = _activeVideoTitle.value,
@@ -431,12 +429,15 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                 confidenceLevel = confLevel,
                 occlusionEventsCount = occlusionCount,
                 totalProcessingTimeMs = totalDurationMs,
-                processingFps = (trackedFrames.size * 1000f) / max(1L, totalDurationMs),
+                processingFps = processingFps,
                 lostLockFlag = lostLock,
                 diagnosticNotes = diagnosticNotes,
                 totalDistanceTraveled = totalDistance,
                 peakSpeed = peakSpeed,
-                averageSpeed = avgSpeed
+                averageSpeed = avgSpeed,
+                moveHistory = moveHistory,
+                fingerprintEvents = fingerprintEvents,
+                targetFingerprint = targetFingerprint
             )
 
             withContext(Dispatchers.Main) {
@@ -445,7 +446,7 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                     isPlaying = false,
                     currentFrameIndex = trackedFrames.size - 1,
                     playbackSpeed = 1.0f,
-                    trailEffect = TrailEffectStyle.NEON_GLOW,
+                    trailEffect = TrailEffectStyle.SPEED_HEATMAP,
                     trailLength = TrailLengthMode.FULL,
                     showBoundingBox = true,
                     showArrow = true,
@@ -457,11 +458,7 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     private fun determineSlot(centerX: Float): String {
-        return when {
-            centerX < 0.38f -> "Left Position"
-            centerX in 0.38f..0.62f -> "Middle Position"
-            else -> "Right Position"
-        }
+        return CardPosition.fromX(centerX).displayLabel
     }
 
     /**

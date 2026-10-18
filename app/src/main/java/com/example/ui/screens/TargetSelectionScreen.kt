@@ -1,56 +1,73 @@
 package com.example.ui.screens
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.NormalizedRect
+import com.example.model.CardPosition
 import com.example.ui.theme.*
 import com.example.ui.util.VideoDisplayGeometry
 import com.example.viewmodel.TargetSelectionState
-import com.example.viewmodel.TargetSizeOption
-import kotlin.math.abs
 
+/**
+ * Fixed 3-Card Grid Single-Tap Target Selection Screen.
+ *
+ * 1. Fixed Card Grid & Bounding Boxes:
+ *    - Position 1 = Left, Position 2 = Middle, Position 3 = Right.
+ *    - Fixed Dark Green outlines around each of the 3 card regions.
+ *    - Interactive Dark/Black touch target area inside each card box for single-tap selection.
+ *
+ * 2. Top Guidance & Selection Header (White Boxes):
+ *    - Positioned above each card bounding box, outlined in white.
+ *    - Displays guidance numbers 1, 2, 3 corresponding to positions.
+ *    - Displays green checkmark ✅ inside the white box when selected.
+ *
+ * 3. Single-Tap Selection:
+ *    - Tapping inside a card or its top indicator immediately locks that card as the target.
+ *    - Only one card can be active at a time.
+ *
+ * 4. Clean UI:
+ *    - Target size slider & preset chips removed completely.
+ *    - Old manual crosshairs removed.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TargetSelectionScreen(
     videoTitle: String,
     selectionState: TargetSelectionState,
-    onFrameTapped: (Float, Float) -> Unit,
-    onTargetSizeChanged: (Float) -> Unit,
+    onCardSelected: (CardPosition) -> Unit,
     onConfirmTarget: () -> Unit,
     onBack: () -> Unit,
-    onBoxDrawn: (NormalizedRect) -> Unit = {}
+    onFrameTapped: ((Float, Float) -> Unit)? = null
 ) {
     val firstFrame = selectionState.firstFrame
-    var displaySize by remember { mutableStateOf(IntSize.Zero) }
-    val hasSelectedTarget = selectionState.selectedBox != null
+    val selectedPosition = selectionState.selectedPosition ?: selectionState.selectedBox?.let { box ->
+        CardPosition.fromX(box.centerX)
+    }
+    val hasSelectedTarget = selectionState.selectedBox != null || selectedPosition != null
 
     Scaffold(
         containerColor = DarkBackground,
@@ -78,7 +95,7 @@ fun TargetSelectionScreen(
                     }
                 },
                 actions = {
-                    if (hasSelectedTarget) {
+                    if (hasSelectedTarget && selectedPosition != null) {
                         Surface(
                             color = EmeraldAccent.copy(alpha = 0.15f),
                             shape = RoundedCornerShape(8.dp),
@@ -97,7 +114,7 @@ fun TargetSelectionScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "TARGET LOCKED",
+                                    text = "POS ${selectedPosition.id} LOCKED",
                                     color = EmeraldAccent,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
@@ -115,16 +132,16 @@ fun TargetSelectionScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Interactive Video Frame Canvas (Tap to Center Card)
+                // Interactive Video Frame Card with Fixed 3-Card Grid
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -133,25 +150,10 @@ fun TargetSelectionScreen(
                         .border(1.5.dp, DarkSurfaceBorder, RoundedCornerShape(16.dp)),
                     colors = CardDefaults.cardColors(containerColor = Color.Black)
                 ) {
-                    Box(
+                    BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxSize()
-                            .onSizeChanged { displaySize = it }
-                            .pointerInput(Unit) {
-                                detectTapGestures { tapOffset ->
-                                    if (displaySize.width > 0 && displaySize.height > 0 && firstFrame != null) {
-                                        val fitRect = VideoDisplayGeometry.calculateFitRect(
-                                            Size(displaySize.width.toFloat(), displaySize.height.toFloat()),
-                                            firstFrame.width,
-                                            firstFrame.height
-                                        )
-                                        val normPt = VideoDisplayGeometry.toNormalizedPoint(tapOffset, fitRect)
-                                        onFrameTapped(normPt.x, normPt.y)
-                                    }
-                                }
-                            }
-                            .testTag("interactive_frame_canvas"),
-                        contentAlignment = Alignment.Center
+                            .testTag("interactive_frame_canvas")
                     ) {
                         if (firstFrame != null) {
                             Image(
@@ -161,70 +163,168 @@ fun TargetSelectionScreen(
                                 contentScale = ContentScale.Fit
                             )
 
-                            // Canvas Overlay for Locked Card Target Reticle
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val w = size.width
-                                val h = size.height
-                                if (w <= 0 || h <= 0) return@Canvas
+                            val containerW = constraints.maxWidth.toFloat()
+                            val containerH = constraints.maxHeight.toFloat()
+                            val fitRect = VideoDisplayGeometry.calculateFitRect(
+                                Size(containerW, containerH),
+                                firstFrame.width,
+                                firstFrame.height
+                            )
 
-                                val targetBox = selectionState.selectedBox
-                                if (targetBox != null) {
-                                    val fitRect = VideoDisplayGeometry.calculateFitRect(
-                                        size,
-                                        firstFrame.width,
-                                        firstFrame.height
-                                    )
-                                    val left = fitRect.left + targetBox.left * fitRect.width
-                                    val top = fitRect.top + targetBox.top * fitRect.height
-                                    val width = targetBox.width * fitRect.width
-                                    val height = targetBox.height * fitRect.height
-                                    val centerX = left + width / 2f
-                                    val centerY = top + height / 2f
+                            val density = LocalDensity.current
+                            val cardPositions = listOf(CardPosition.LEFT, CardPosition.MIDDLE, CardPosition.RIGHT)
 
-                                    // Outer Box Stroke (Emerald when locked)
-                                    drawRoundRect(
-                                        color = EmeraldAccent,
-                                        topLeft = Offset(left, top),
-                                        size = Size(width, height),
-                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f),
-                                        style = Stroke(width = 3.dp.toPx())
-                                    )
+                            // 1. Touch detector with Aspect-Fit Relative Coordinate Transformation
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .pointerInput(fitRect) {
+                                        detectTapGestures { tapOffset ->
+                                            val relativeX = ((tapOffset.x - fitRect.left) / fitRect.width).coerceIn(0f, 1f)
+                                            val relativeY = ((tapOffset.y - fitRect.top) / fitRect.height).coerceIn(0f, 1f)
 
-                                    // Subtle inner glowing fill
-                                    drawRoundRect(
-                                        color = EmeraldAccent.copy(alpha = 0.08f),
-                                        topLeft = Offset(left, top),
-                                        size = Size(width, height),
-                                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8f, 8f)
-                                    )
+                                            val hitPos = CardPosition.findPositionAt(relativeX, relativeY)
+                                                ?: when {
+                                                    relativeX < 0.50f -> CardPosition.LEFT
+                                                    relativeX in 0.50f..0.64f -> CardPosition.MIDDLE
+                                                    else -> CardPosition.RIGHT
+                                                }
 
-                                    // 4 Corner Brackets
-                                    val cornerLen = 18.dp.toPx()
-                                    val bracketStroke = 4.dp.toPx()
-                                    val cornerColor = Color.White
+                                            onCardSelected(hitPos)
+                                            onFrameTapped?.invoke(relativeX, relativeY)
+                                        }
+                                    }
+                            )
 
-                                    // Top-Left
-                                    drawLine(cornerColor, Offset(left, top), Offset(left + cornerLen, top), bracketStroke)
-                                    drawLine(cornerColor, Offset(left, top), Offset(left, top + cornerLen), bracketStroke)
-                                    // Top-Right
-                                    drawLine(cornerColor, Offset(left + width, top), Offset(left + width - cornerLen, top), bracketStroke)
-                                    drawLine(cornerColor, Offset(left + width, top), Offset(left + width, top + cornerLen), bracketStroke)
-                                    // Bottom-Left
-                                    drawLine(cornerColor, Offset(left, top + height), Offset(left + cornerLen, top + height), bracketStroke)
-                                    drawLine(cornerColor, Offset(left, top + height), Offset(left, top + height - cornerLen), bracketStroke)
-                                    // Bottom-Right
-                                    drawLine(cornerColor, Offset(left + width, top + height), Offset(left + width - cornerLen, top + height), bracketStroke)
-                                    drawLine(cornerColor, Offset(left + width, top + height), Offset(left + width, top + height - cornerLen), bracketStroke)
+                            // 2. Active Video Viewport Overlay anchored strictly at fitRect
+                            val fitLeftDp = with(density) { fitRect.left.toDp() }
+                            val fitTopDp = with(density) { fitRect.top.toDp() }
+                            val fitWidthDp = with(density) { fitRect.width.toDp() }
+                            val fitHeightDp = with(density) { fitRect.height.toDp() }
 
-                                    // Center Precision Crosshair
-                                    val chSize = 14.dp.toPx()
-                                    drawLine(EmeraldAccent, Offset(centerX - chSize, centerY), Offset(centerX + chSize, centerY), 2.dp.toPx())
-                                    drawLine(EmeraldAccent, Offset(centerX, centerY - chSize), Offset(centerX, centerY + chSize), 2.dp.toPx())
-                                    drawCircle(EmeraldAccent, radius = 4.dp.toPx(), center = Offset(centerX, centerY))
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .offset(x = fitLeftDp, y = fitTopDp)
+                                    .size(width = fitWidthDp, height = fitHeightDp)
+                            ) {
+                                cardPositions.forEach { pos ->
+                                    val cardRect = pos.getPreconfiguredRect()
+                                    val isSelected = (selectedPosition == pos)
+
+                                    // Direct transformation:
+                                    // screenX = fitRect.left + relativeX * fitRect.width
+                                    // Inside this overlay Box (aligned TopStart at fitRect), local offset is:
+                                    val cardLeftDp = with(density) { (cardRect.left * fitRect.width).toDp() }
+                                    val cardTopDp = with(density) { (cardRect.top * fitRect.height).toDp() }
+                                    val cardWidthDp = with(density) { (cardRect.width * fitRect.width).toDp() }
+                                    val cardHeightDp = with(density) { (cardRect.height * fitRect.height).toDp() }
+
+                                    // Top Guidance & Selection Header (White Box)
+                                    val whiteBoxWidth = 46.dp.coerceAtMost(cardWidthDp * 0.85f)
+                                    val whiteBoxHeight = 28.dp
+                                    val whiteBoxLeft = cardLeftDp + (cardWidthDp - whiteBoxWidth) / 2f
+                                    val whiteBoxTop = (cardTopDp - whiteBoxHeight - 6.dp).coerceAtLeast(2.dp)
+
+                                    // 1. Top Indicator Box (Outlined in White)
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .offset(x = whiteBoxLeft, y = whiteBoxTop)
+                                            .size(width = whiteBoxWidth, height = whiteBoxHeight)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color.Black.copy(alpha = 0.90f))
+                                            .border(
+                                                width = 2.dp,
+                                                color = Color.White,
+                                                shape = RoundedCornerShape(6.dp)
+                                            )
+                                            .clickable {
+                                                onCardSelected(pos)
+                                                onFrameTapped?.invoke(pos.defaultCenterX, pos.defaultCenterY)
+                                            }
+                                            .testTag("top_white_box_${pos.id}"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center
+                                            ) {
+                                                Text(
+                                                    text = "✅",
+                                                    fontSize = 12.sp
+                                                )
+                                                Spacer(modifier = Modifier.width(2.dp))
+                                                Text(
+                                                    text = "${pos.id}",
+                                                    color = EmeraldAccent,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp,
+                                                    fontFamily = FontFamily.Monospace
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = "${pos.id}",
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+
+                                    // 2. Card Bounding Box & Interactive Touch Area
+                                    // Dark Green outline + Black/Dark interactive tap zone
+                                    val darkGreenOutline = Color(0xFF1B5E20)
+                                    val darkGreenBorderColor = if (isSelected) EmeraldAccent else darkGreenOutline
+
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .offset(x = cardLeftDp, y = cardTopDp)
+                                            .size(width = cardWidthDp, height = cardHeightDp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(
+                                                if (isSelected) Color(0xAA051A0E) else Color(0x99000000)
+                                            )
+                                            .border(
+                                                width = if (isSelected) 3.dp else 2.5.dp,
+                                                color = darkGreenBorderColor,
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable {
+                                                onCardSelected(pos)
+                                                onFrameTapped?.invoke(pos.defaultCenterX, pos.defaultCenterY)
+                                            }
+                                            .testTag("card_touch_zone_${pos.id}"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Surface(
+                                                color = EmeraldAccent.copy(alpha = 0.20f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, EmeraldAccent)
+                                            ) {
+                                                Text(
+                                                    text = "TARGET",
+                                                    color = EmeraldAccent,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } else {
-                            CircularProgressIndicator(color = NeonCyan)
+                            CircularProgressIndicator(
+                                modifier = Modifier.align(Alignment.Center),
+                                color = NeonCyan
+                            )
                         }
                     }
                 }
@@ -238,146 +338,47 @@ fun TargetSelectionScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
+                            .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AdsClick,
-                            contentDescription = null,
-                            tint = if (hasSelectedTarget) EmeraldAccent else NeonCyan,
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Surface(
+                            color = if (hasSelectedTarget) EmeraldAccent.copy(alpha = 0.2f) else DarkSurfaceElevated,
+                            shape = CircleShape,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (hasSelectedTarget) "✅" else "🎯",
+                                    fontSize = 18.sp
+                                )
+                            }
+                        }
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (hasSelectedTarget) "Target Card Positioned • تم تحديد الكرت" else "Tap on Target Card • اضغط على الكرت المطلوب",
+                                text = if (hasSelectedTarget && selectedPosition != null) {
+                                    "Target Selected: ${selectedPosition.nameEn} • تم تحديد الكرت"
+                                } else {
+                                    "Select Target Card • اضغط على الكرت المطلوب"
+                                },
                                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                                 color = TextPrimary
                             )
                             Text(
-                                text = "Tap directly on the card to set its center, then choose the Target Size below.",
+                                text = if (hasSelectedTarget && selectedPosition != null) {
+                                    "Position ${selectedPosition.id} (${selectedPosition.nameEn} • ${selectedPosition.nameAr}) locked. Tap any card to switch."
+                                } else {
+                                    "Tap directly inside any of the 3 card boxes (1 Left, 2 Middle, 3 Right) to select the target."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
                             )
                         }
                     }
                 }
-
-                // Predefined Target Size Options & Dimension Scale
-                Surface(
-                    color = DarkSurface,
-                    shape = RoundedCornerShape(14.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        // Header row with Target Size title and current percentage
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AspectRatio,
-                                    contentDescription = null,
-                                    tint = NeonCyan,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Text(
-                                    text = "Target Size • حجم الهدف",
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = TextPrimary
-                                )
-                            }
-                            Surface(
-                                color = NeonCyan.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = "${(selectionState.targetSizeScale * 100).toInt()}%",
-                                    color = NeonCyan,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-
-                        // Predefined Size Chips (Small, Standard, Large, XL)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            TargetSizeOption.values().forEach { option ->
-                                val isSelected = abs(selectionState.targetSizeScale - option.scale) < 0.08f
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { onTargetSizeChanged(option.scale) },
-                                    label = {
-                                        Text(
-                                            text = option.label,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = NeonCyan.copy(alpha = 0.22f),
-                                        selectedLabelColor = NeonCyan,
-                                        containerColor = DarkSurfaceElevated,
-                                        labelColor = TextSecondary
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = isSelected,
-                                        borderColor = if (isSelected) NeonCyan else DarkSurfaceBorder
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("size_chip_${option.name.lowercase()}")
-                                )
-                            }
-                        }
-
-                        // Fine-tuning Target Size Slider
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Fine Scale:",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary
-                            )
-                            Slider(
-                                value = selectionState.targetSizeScale,
-                                onValueChange = onTargetSizeChanged,
-                                valueRange = 0.6f..1.8f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = NeonCyan,
-                                    activeTrackColor = NeonCyan,
-                                    inactiveTrackColor = DarkSurfaceBorder
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("box_scale_slider")
-                            )
-                        }
-                    }
-                }
             }
 
-            // Bottom CTA
+            // Bottom CTA Button (Without crosshair)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -393,18 +394,22 @@ fun TargetSelectionScreen(
                         .testTag("confirm_target_button"),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (hasSelectedTarget) EmeraldAccent else NeonCyan,
-                        contentColor = Color(0xFF032210)
+                        containerColor = if (hasSelectedTarget) EmeraldAccent else DarkSurfaceBorder,
+                        contentColor = if (hasSelectedTarget) Color(0xFF032210) else TextSecondary
                     )
                 ) {
                     Icon(
-                        imageVector = if (hasSelectedTarget) Icons.Default.Lock else Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Start Tracking",
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = if (hasSelectedTarget) "Lock Target & Start Tracking • بدء التتبع" else "Select Target to Continue",
+                        text = if (hasSelectedTarget) {
+                            "Lock Target & Start Tracking • بدء التتبع"
+                        } else {
+                            "Select Target Card to Continue"
+                        },
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )

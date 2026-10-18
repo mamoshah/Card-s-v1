@@ -2,9 +2,12 @@ package com.example.engine
 
 import android.graphics.Bitmap
 import com.example.ai.CardCandidateDescriptor
+import com.example.model.CardPosition
+import com.example.model.FingerprintUsageEvent
 import com.example.model.NormalizedPoint
 import com.example.model.NormalizedRect
 import com.example.model.TrackedFrame
+import com.example.model.TrackedTargetFingerprint
 import com.example.model.TrackingState
 import kotlin.math.abs
 import kotlin.math.exp
@@ -83,13 +86,23 @@ class OpticalFlowTracker(
     private var previousPyramid: ImagePyramid? = null
     private var trackedPoints: MutableList<FeaturePoint> = mutableListOf()
 
-    // Motion kinematics & smoothing
+    // Motion kinematics & smoothing (Locked strictly to horizontal card movement axis)
     private var velocityX: Float = 0f
     private var velocityY: Float = 0f
     private var smoothCenterX: Float = 0.5f
     private var smoothCenterY: Float = 0.5f
+    private var lockedCenterY: Float = 0.5f
     private var consecutiveOcclusionFrames: Int = 0
     private var stationaryFramesCount: Int = 0
+
+    // Visual Template Fingerprint (Captured on Frame 0) & Re-Acquisition Logging
+    private var targetFingerprint: TrackedTargetFingerprint? = null
+    private val fingerprintEvents = mutableListOf<FingerprintUsageEvent>()
+
+    // Stacking & Overlap State Tracking
+    private var inStackOcclusion: Boolean = false
+    private var stackStartFrame: Int = 0
+    private var stackStartTimestamp: Long = 0L
 
     /**
      * Initializes tracking on Frame 0 with user-selected target ROI.
@@ -103,13 +116,18 @@ class OpticalFlowTracker(
         currentRect = targetRect
         initialCardWidth = targetRect.width.coerceIn(0.08f, 0.45f)
         initialCardHeight = targetRect.height.coerceIn(0.12f, 0.65f)
+        lockedCenterY = targetRect.centerY
         smoothCenterX = targetRect.centerX
-        smoothCenterY = targetRect.centerY
+        smoothCenterY = lockedCenterY
         previousPyramid = buildPyramid(gray, maxPyramidLevels)
         consecutiveOcclusionFrames = 0
         stationaryFramesCount = 0
         velocityX = 0f
         velocityY = 0f
+        inStackOcclusion = false
+        stackStartFrame = 0
+        stackStartTimestamp = 0L
+        fingerprintEvents.clear()
 
         // Crop reference target card bitmap for Gemini multimodal vision
         try {
@@ -160,6 +178,29 @@ class OpticalFlowTracker(
         val absBottom = (targetRect.bottom * h).toInt().coerceIn(0, h - 1)
 
         trackedPoints = detectCardFeatures(gray, absLeft, absTop, absRight, absBottom)
+
+        // Capture immutable high-resolution Target Visual Fingerprint
+        val initPos = CardPosition.fromX(targetRect.centerX)
+        targetFingerprint = TrackedTargetFingerprint(
+            initialTargetRect = targetRect,
+            initialPosition = initPos,
+            templateWidth = templateWidth,
+            templateHeight = templateHeight,
+            zeroMeanPatch = zm,
+            templateNorm = groundTruthTemplateNorm,
+            meanBrightness = targetMeanBrightness,
+            isRedSuit = isRedSuitTarget,
+            isBlackSuit = isBlackSuitTarget,
+            keyFeaturesCount = trackedPoints.size,
+            redPixelCount = redPixels,
+            darkPixelCount = darkPixels
+        )
+    }
+
+    fun getTargetFingerprint(): TrackedTargetFingerprint? = targetFingerprint
+    fun getFingerprintEvents(): List<FingerprintUsageEvent> = fingerprintEvents.toList()
+    fun addFingerprintEvent(event: FingerprintUsageEvent) {
+        fingerprintEvents.add(event)
     }
 
     /**
@@ -229,58 +270,49 @@ class OpticalFlowTracker(
             if (validDeltas.size >= 3) {
                 // Median consensus motion (robust to dealer finger outliers)
                 val sortedX = validDeltas.map { it.first }.sorted()
-                val sortedY = validDeltas.map { it.second }.sorted()
                 val medianDx = sortedX[sortedX.size / 2]
-                val medianDy = sortedY[sortedY.size / 2]
 
                 val normDx = medianDx / width
-                val normDy = medianDy / height
-                val jump = sqrt(normDx * normDx + normDy * normDy)
+                val jump = abs(normDx)
                 // Filter out physically impossible per-frame leaps (> 15% screen)
                 if (jump <= 0.15f) {
                     flowDx = normDx
-                    flowDy = normDy
+                    flowDy = 0f // Pure horizontal tracking axis
                     flowValid = true
                 }
             }
         }
 
         // Phase 2: Physically Constrained Local Search Space
-        // NO arbitrary global table slot jumping to prevent misidentifying adjacent cards!
+        // NO vertical drift, locked directly along the horizontal card movement axis
         val effectiveDx = if (flowValid) flowDx else velocityX
-        val effectiveDy = if (flowValid) flowDy else velocityY
-
         val predictedX = (targetRect.centerX + effectiveDx).coerceIn(0.08f, 0.92f)
-        val predictedY = (targetRect.centerY + effectiveDy).coerceIn(0.18f, 0.82f)
+        val predictedY = lockedCenterY
 
         val candidateCenters = mutableListOf<NormalizedPoint>()
 
-        // 1. Primary Kinematic Hypotheses
-        candidateCenters.add(NormalizedPoint(predictedX, predictedY))
-        candidateCenters.add(NormalizedPoint(targetRect.centerX, targetRect.centerY)) // stationary hold
+        // 1. Primary Kinematic Hypotheses (constrained to locked horizontal baseline)
+        candidateCenters.add(NormalizedPoint(predictedX, lockedCenterY))
+        candidateCenters.add(NormalizedPoint(targetRect.centerX, lockedCenterY)) // stationary hold
         if (flowValid) {
             candidateCenters.add(
                 NormalizedPoint(
                     (targetRect.centerX + flowDx).coerceIn(0.08f, 0.92f),
-                    (targetRect.centerY + flowDy).coerceIn(0.18f, 0.82f)
+                    lockedCenterY
                 )
             )
         }
 
-        // 2. Continuous localized neighborhood search around predicted center
-        // Tightly bounded radius so tracker cannot jump to adjacent cards
+        // 2. Continuous localized horizontal search along card movement axis (left and right only)
         val xOffsets = floatArrayOf(-0.06f, -0.045f, -0.03f, -0.015f, 0.015f, 0.03f, 0.045f, 0.06f)
-        val yOffsets = floatArrayOf(-0.035f, -0.02f, 0.0f, 0.02f, 0.035f)
 
         for (dx in xOffsets) {
-            for (dy in yOffsets) {
-                candidateCenters.add(
-                    NormalizedPoint(
-                        (predictedX + dx).coerceIn(0.08f, 0.92f),
-                        (predictedY + dy).coerceIn(0.18f, 0.82f)
-                    )
+            candidateCenters.add(
+                NormalizedPoint(
+                    (predictedX + dx).coerceIn(0.08f, 0.92f),
+                    lockedCenterY
                 )
-            }
+            )
         }
 
         // Phase 3: Evaluate Candidates with Multi-Criteria Identity Scoring & Spatial Gating
@@ -298,7 +330,7 @@ class OpticalFlowTracker(
                 pt.x, pt.y,
                 initialCardWidth, initialCardHeight,
                 rgb, currentGray,
-                predictedX, predictedY
+                predictedX, lockedCenterY
             )
 
             if (cand.score > bestScore) {
@@ -307,118 +339,201 @@ class OpticalFlowTracker(
             }
         }
 
-        // Fine sub-pixel refinement around top candidate for exact center alignment
+        // Fine sub-pixel refinement around top candidate for exact center alignment along horizontal axis
         if (bestCandidate != null && bestCandidate.score >= 0.28f) {
             val peakX = bestCandidate.centerX
-            val peakY = bestCandidate.centerY
             val microOffsets = floatArrayOf(-0.006f, -0.003f, 0.003f, 0.006f)
             for (mx in microOffsets) {
-                for (my in microOffsets) {
-                    val subCand = evaluateCandidate(
-                        (peakX + mx).coerceIn(0.08f, 0.92f),
-                        (peakY + my).coerceIn(0.18f, 0.82f),
-                        initialCardWidth, initialCardHeight,
-                        rgb, currentGray,
-                        predictedX, predictedY
-                    )
-                    if (subCand.score > bestScore) {
-                        bestScore = subCand.score
-                        bestCandidate = subCand
-                    }
+                val subCand = evaluateCandidate(
+                    (peakX + mx).coerceIn(0.08f, 0.92f),
+                    lockedCenterY,
+                    initialCardWidth, initialCardHeight,
+                    rgb, currentGray,
+                    predictedX, lockedCenterY
+                )
+                if (subCand.score > bestScore) {
+                    bestScore = subCand.score
+                    bestCandidate = subCand
                 }
             }
         }
 
         var newCenterX = predictedX
-        var newCenterY = predictedY
+        val newCenterY = lockedCenterY
 
         val chosen = bestCandidate
 
-        if (chosen != null && chosen.isCardPresent && chosen.score >= 0.38f) {
+        // Phase 3.5: Visual Template Re-Acquisition Scan across emerging card slots (Position 1, 2, 3)
+        // Evaluates canonical card slots: Left (~0.43), Middle (~0.57), Right (~0.71) using Template Matching
+        var reacquiredCandidate: CardCandidate? = null
+        if (inStackOcclusion || consecutiveOcclusionFrames >= 1 || (chosen == null || chosen.score < 0.42f)) {
+            val slotPositions = listOf(
+                CardPosition.LEFT.defaultCenterX,
+                CardPosition.MIDDLE.defaultCenterX,
+                CardPosition.RIGHT.defaultCenterX
+            )
+            var bestSlotScore = -1f
+            var topSlotCandidate: CardCandidate? = null
+            for (slotX in slotPositions) {
+                val slotCand = evaluateCandidate(
+                    cx = slotX,
+                    cy = lockedCenterY,
+                    cardW = initialCardWidth,
+                    cardH = initialCardHeight,
+                    rgb = rgb,
+                    gray = currentGray,
+                    predictedX = slotX,
+                    predictedY = lockedCenterY,
+                    applySpatialGate = false // Global visual template matching against stored fingerprint
+                )
+                if (slotCand.isCardPresent && slotCand.score > bestSlotScore) {
+                    bestSlotScore = slotCand.score
+                    topSlotCandidate = slotCand
+                }
+            }
+
+            // Re-anchor instantly if highest visual confidence score exceeds > 0.80 (or >= 0.75)
+            if (topSlotCandidate != null && bestSlotScore >= 0.75f) {
+                reacquiredCandidate = topSlotCandidate
+            }
+        }
+
+        // Stacking & Overlap Detection: multiple card boxes collapse into center stack
+        val isCenterStackRegion = targetRect.centerX in 0.44f..0.66f || predictedX in 0.44f..0.66f
+        val isFeatureConsistencyDrop = inlierCount < 3 || !flowValid
+        val isStackOverlap = isCenterStackRegion && (isFeatureConsistencyDrop && (chosen == null || chosen.score < 0.45f || chosen.isHandOccluded))
+
+        var instantSnap = false
+
+        if (reacquiredCandidate != null) {
+            // Re-anchor target bounding box and center coordinate (+) instantly to card region with highest visual confidence (> 0.80)
+            newCenterX = reacquiredCandidate.centerX
+            trackingState = TrackingState.TRACKING_LOCKED
+            isOccluded = false
+            confidence = reacquiredCandidate.score.coerceIn(0.80f, 1.0f)
+            instantSnap = true
+
+            val stepDx = newCenterX - targetRect.centerX
+            velocityX = stepDx * 0.70f
+            velocityY = 0f
+
+            val restoredPos = CardPosition.fromX(reacquiredCandidate.centerX)
+            val startF = if (inStackOcclusion) stackStartFrame else max(0, frameIndex - max(1, consecutiveOcclusionFrames))
+            val startT = if (inStackOcclusion) stackStartTimestamp else max(0L, timestampMs - max(1, consecutiveOcclusionFrames) * 33L)
+            val reason = if (inStackOcclusion) "Card Overlap / Center Stack" else "Unstacking Separation"
+
+            fingerprintEvents.add(
+                FingerprintUsageEvent(
+                    startFrame = startF,
+                    endFrame = frameIndex,
+                    startTimestampMs = startT,
+                    endTimestampMs = timestampMs,
+                    targetPosition = targetFingerprint?.initialPosition ?: CardPosition.MIDDLE,
+                    reason = reason,
+                    restoredPosition = restoredPos,
+                    confidenceScore = confidence
+                )
+            )
+
+            consecutiveOcclusionFrames = 0
+            inStackOcclusion = false
+        } else if (isStackOverlap) {
+            // Stacking & Overlap Detection: trigger OCCLUSION_STACK and maintain momentum instead of freezing at center
+            if (!inStackOcclusion) {
+                inStackOcclusion = true
+                stackStartFrame = frameIndex
+                stackStartTimestamp = timestampMs
+            }
+            consecutiveOcclusionFrames++
+            trackingState = TrackingState.OCCLUSION_STACK
+            isOccluded = true
+            confidence = max(0.40f, 0.70f - consecutiveOcclusionFrames * 0.03f)
+
+            // Maintain momentum (velocityX inertial coasting) instead of freezing coordinates at center
+            newCenterX = (targetRect.centerX + velocityX).coerceIn(0.08f, 0.92f)
+            velocityX *= 0.92f
+            velocityY = 0f
+        } else if (chosen != null && chosen.isCardPresent && chosen.score >= 0.38f) {
             // High confidence lock on target card
             newCenterX = chosen.centerX
-            newCenterY = chosen.centerY
             trackingState = TrackingState.TRACKING_LOCKED
             consecutiveOcclusionFrames = 0
             isOccluded = false
             confidence = chosen.score.coerceIn(0.60f, 1.0f)
+            inStackOcclusion = false
 
-            // Update smooth velocity
+            // Update smooth horizontal velocity
             val stepDx = newCenterX - targetRect.centerX
-            val stepDy = newCenterY - targetRect.centerY
             velocityX = velocityX * 0.30f + stepDx * 0.70f
-            velocityY = velocityY * 0.30f + stepDy * 0.70f
+            velocityY = 0f
 
             // Slow adaptive update on clean, unoccluded frames
             if (!chosen.isHandOccluded && chosen.score >= 0.75f) {
-                updateAdaptiveTemplate(currentGray, newCenterX, newCenterY)
+                updateAdaptiveTemplate(currentGray, newCenterX, lockedCenterY)
             }
         } else if (chosen != null && chosen.isHandOccluded) {
-            // Hand is passing over card: Occlusion coasting along swap trajectory
+            // Hand is passing over card: Occlusion coasting along horizontal swap trajectory
             consecutiveOcclusionFrames++
             trackingState = TrackingState.OCCLUDED_COASTING
             isOccluded = true
             confidence = max(0.35f, 0.70f - consecutiveOcclusionFrames * 0.04f)
 
-            // During hand occlusion, guide center along smooth velocity prediction
+            // During hand occlusion, guide center strictly along horizontal axis
             newCenterX = (targetRect.centerX + velocityX).coerceIn(0.08f, 0.92f)
-            newCenterY = (targetRect.centerY + velocityY * 0.6f).coerceIn(0.18f, 0.82f)
             velocityX *= 0.85f
-            velocityY *= 0.85f
+            velocityY = 0f
         } else if (chosen != null && chosen.isCardPresent && chosen.score >= 0.24f) {
-            // Re-acquiring target card
+            // Re-acquiring target card horizontally
             newCenterX = chosen.centerX
-            newCenterY = chosen.centerY
             trackingState = TrackingState.REACQUIRING
             isOccluded = false
             confidence = 0.52f
             consecutiveOcclusionFrames = 0
+            inStackOcclusion = false
             val stepDx = newCenterX - targetRect.centerX
-            val stepDy = newCenterY - targetRect.centerY
             velocityX = velocityX * 0.4f + stepDx * 0.6f
-            velocityY = velocityY * 0.4f + stepDy * 0.6f
+            velocityY = 0f
         } else {
-            // Fallback: Hold last confirmed card position rather than wandering to adjacent regions
+            // Fallback: Hold last confirmed card position strictly on horizontal track
             newCenterX = targetRect.centerX
-            newCenterY = targetRect.centerY
             velocityX *= 0.4f
-            velocityY *= 0.4f
+            velocityY = 0f
             consecutiveOcclusionFrames++
             trackingState = TrackingState.OCCLUDED_COASTING
             isOccluded = true
             confidence = max(0.20f, 0.50f - consecutiveOcclusionFrames * 0.05f)
         }
 
-        // Clamp coordinates firmly inside visible card playing bounds (NO invalid coordinates)
+        // Clamp horizontal coordinates firmly inside visible card playing bounds
         newCenterX = newCenterX.coerceIn(0.08f, 0.92f)
-        newCenterY = newCenterY.coerceIn(0.18f, 0.82f)
 
         // Stationary lock toward end of video or when card comes to rest
-        val calculatedSpeed = sqrt(velocityX * velocityX + velocityY * velocityY)
+        val calculatedSpeed = abs(velocityX)
         if (calculatedSpeed < 0.008f) {
             stationaryFramesCount++
             if (stationaryFramesCount > 5) {
                 // Stationary lock damping
                 velocityX *= 0.2f
-                velocityY *= 0.2f
+                velocityY = 0f
             }
         } else {
             stationaryFramesCount = 0
         }
 
-        // Adaptive smoothing: Direct card center alignment throughout all video frames
+        // Adaptive smoothing: Direct card center alignment along horizontal baseline
         // High responsiveness during motion; zero-lag, jitter-free lock when stationary
         val smoothAlpha = when {
+            instantSnap -> 1.0f
             calculatedSpeed > 0.025f -> 0.82f
             calculatedSpeed > 0.010f -> 0.70f
             else -> 0.45f
         }
-        smoothCenterX = smoothCenterX * (1f - smoothAlpha) + newCenterX * smoothAlpha
-        smoothCenterY = smoothCenterY * (1f - smoothAlpha) + newCenterY * smoothAlpha
+        smoothCenterX = if (instantSnap) newCenterX else (smoothCenterX * (1f - smoothAlpha) + newCenterX * smoothAlpha)
+        smoothCenterY = lockedCenterY // Locked strictly to horizontal axis
 
-        // Final centered bounding box aligned directly with the card center
+        // Final centered bounding box aligned directly with the card center on horizontal axis
         val updatedRect = NormalizedRect.fromCenter(
-            NormalizedPoint(smoothCenterX, smoothCenterY),
+            NormalizedPoint(smoothCenterX, lockedCenterY),
             initialCardWidth,
             initialCardHeight
         )
@@ -427,9 +542,9 @@ class OpticalFlowTracker(
 
         // Reseed feature points strictly inside confirmed card body
         val absLeft = ((smoothCenterX - initialCardWidth / 2f) * width).toInt().coerceIn(0, width - 1)
-        val absTop = ((smoothCenterY - initialCardHeight / 2f) * height).toInt().coerceIn(0, height - 1)
+        val absTop = ((lockedCenterY - initialCardHeight / 2f) * height).toInt().coerceIn(0, height - 1)
         val absRight = ((smoothCenterX + initialCardWidth / 2f) * width).toInt().coerceIn(0, width - 1)
-        val absBottom = ((smoothCenterY + initialCardHeight / 2f) * height).toInt().coerceIn(0, height - 1)
+        val absBottom = ((lockedCenterY + initialCardHeight / 2f) * height).toInt().coerceIn(0, height - 1)
 
         trackedPoints = detectCardFeatures(currentGray, absLeft, absTop, absRight, absBottom)
 
@@ -437,15 +552,15 @@ class OpticalFlowTracker(
             frameIndex = frameIndex,
             timestampMs = timestampMs,
             rect = updatedRect,
-            center = NormalizedPoint(smoothCenterX, smoothCenterY),
+            center = NormalizedPoint(smoothCenterX, lockedCenterY),
             confidence = confidence,
             trackingState = trackingState,
             isOccluded = isOccluded,
             inlierCount = inlierCount,
             velocityX = velocityX,
-            velocityY = velocityY,
+            velocityY = 0f,
             speed = calculatedSpeed,
-            smoothedCenter = NormalizedPoint(smoothCenterX, smoothCenterY),
+            smoothedCenter = NormalizedPoint(smoothCenterX, lockedCenterY),
             bitmap = frameBitmap
         )
     }
@@ -660,6 +775,7 @@ class OpticalFlowTracker(
         val clampedX = newCenter.x.coerceIn(0.08f, 0.92f)
         val clampedY = newCenter.y.coerceIn(0.18f, 0.82f)
 
+        lockedCenterY = clampedY
         smoothCenterX = clampedX
         smoothCenterY = clampedY
         velocityX = 0f
@@ -687,7 +803,7 @@ class OpticalFlowTracker(
     /**
      * Returns the current smoothed center of the tracked card.
      */
-    fun getCurrentCenter(): NormalizedPoint = NormalizedPoint(smoothCenterX, smoothCenterY)
+    fun getCurrentCenter(): NormalizedPoint = NormalizedPoint(smoothCenterX, lockedCenterY)
 
     /**
      * Returns the target card initial bounding dimensions.

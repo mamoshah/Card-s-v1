@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -12,6 +13,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.screens.LoginScreen
 import com.example.ui.screens.ResultScreen
 import com.example.ui.screens.TargetSelectionScreen
 import com.example.ui.screens.TrackingProgressScreen
@@ -19,6 +21,7 @@ import com.example.ui.screens.UploadScreen
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.AppScreen
+import com.example.viewmodel.AuthViewModel
 import com.example.viewmodel.CardTrackerViewModel
 
 class MainActivity : ComponentActivity() {
@@ -31,16 +34,55 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = DarkBackground
                 ) {
-                    CardTrackerApp()
+                    CardTrackerRoot()
                 }
             }
         }
     }
 }
 
+/**
+ * Root Composable protecting all application screens behind the Room Database Login Screen.
+ */
+@Composable
+fun CardTrackerRoot(
+    authViewModel: AuthViewModel = viewModel(),
+    trackerViewModel: CardTrackerViewModel = viewModel()
+) {
+    val isAuthenticated by authViewModel.isAuthenticated.collectAsState()
+    val authUiState by authViewModel.uiState.collectAsState()
+    val currentUser by authViewModel.currentUser.collectAsState()
+
+    Crossfade(targetState = isAuthenticated, label = "auth_screen_gate") { authenticated ->
+        if (!authenticated) {
+            LoginScreen(
+                uiState = authUiState,
+                onHostNameChange = { authViewModel.onHostNameChanged(it) },
+                onPasswordChange = { authViewModel.onPasswordChanged(it) },
+                onTogglePasswordVisibility = { authViewModel.togglePasswordVisibility() },
+                onSubmitHostName = { authViewModel.submitHostName() },
+                onSubmitPassword = { authViewModel.submitPassword() },
+                onClearMessages = { authViewModel.clearMessages() }
+            )
+        } else {
+            // Main protected application
+            CardTrackerApp(
+                viewModel = trackerViewModel,
+                currentUser = currentUser,
+                onLogout = {
+                    trackerViewModel.resetToUpload()
+                    authViewModel.logout()
+                }
+            )
+        }
+    }
+}
+
 @Composable
 fun CardTrackerApp(
-    viewModel: CardTrackerViewModel = viewModel()
+    viewModel: CardTrackerViewModel = viewModel(),
+    currentUser: com.example.data.local.UserEntity? = null,
+    onLogout: () -> Unit = {}
 ) {
     val currentScreen by viewModel.currentScreen.collectAsState()
     val activeTitle by viewModel.activeVideoTitle.collectAsState()
@@ -58,7 +100,9 @@ fun CardTrackerApp(
                 onBenchmarkSelected = { viewModel.selectBenchmarkVideo(it) },
                 onVideoUploaded = { uri, name -> viewModel.selectUploadedVideo(uri, name) },
                 errorMessage = errorMessage,
-                onDismissError = { viewModel.dismissError() }
+                onDismissError = { viewModel.dismissError() },
+                currentUser = currentUser,
+                onLogout = onLogout
             )
         }
 
@@ -69,10 +113,10 @@ fun CardTrackerApp(
             TargetSelectionScreen(
                 videoTitle = activeTitle,
                 selectionState = selectionState,
-                onFrameTapped = { x, y -> viewModel.onFrameTapped(x, y) },
-                onTargetSizeChanged = { viewModel.setTargetSizeScale(it) },
+                onCardSelected = { viewModel.selectCardPosition(it) },
                 onConfirmTarget = { viewModel.startAnalysis() },
-                onBack = { viewModel.resetToUpload() }
+                onBack = { viewModel.resetToUpload() },
+                onFrameTapped = { x, y -> viewModel.onFrameTapped(x, y) }
             )
         }
 
