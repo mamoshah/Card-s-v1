@@ -29,9 +29,11 @@ data class VideoMetadata(
     val durationMs: Long,
     val width: Int,
     val height: Int,
-    val rotation: Int,
+    val rotation: Int = 0,
     val file: File? = null,
-    val mimeType: String = "video/mp4"
+    val mimeType: String = "video/mp4",
+    val rawWidth: Int = width,
+    val rawHeight: Int = height
 )
 
 /**
@@ -249,9 +251,16 @@ class VideoFrameExtractor(private val context: Context) {
                 val mimeStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_MIMETYPE) ?: "video/mp4"
 
                 var durationMs = durationStr?.toLongOrNull() ?: 0L
-                val width = widthStr?.toIntOrNull() ?: 640
-                val height = heightStr?.toIntOrNull() ?: 480
+                val rawWidth = widthStr?.toIntOrNull() ?: 640
+                val rawHeight = heightStr?.toIntOrNull() ?: 480
                 val rotation = rotationStr?.toIntOrNull() ?: 0
+
+                // Correct display dimensions based on rotation metadata
+                val (width, height) = if (rotation == 90 || rotation == 270) {
+                    Pair(rawHeight, rawWidth)
+                } else {
+                    Pair(rawWidth, rawHeight)
+                }
 
                 if (durationMs <= 0L) {
                     durationMs = probeDurationWithExtractor(file)
@@ -266,7 +275,9 @@ class VideoFrameExtractor(private val context: Context) {
                     height = height,
                     rotation = rotation,
                     file = file,
-                    mimeType = mimeStr
+                    mimeType = mimeStr,
+                    rawWidth = rawWidth,
+                    rawHeight = rawHeight
                 )
             }
         } catch (e: Exception) {
@@ -277,7 +288,9 @@ class VideoFrameExtractor(private val context: Context) {
                 width = 640,
                 height = 480,
                 rotation = 0,
-                file = file
+                file = file,
+                rawWidth = 640,
+                rawHeight = 480
             )
         }
     }
@@ -292,12 +305,16 @@ class VideoFrameExtractor(private val context: Context) {
         val holder = getSafeRetriever(file, uri)
         var bmp: Bitmap? = null
 
+        var rawWidth = 0
+        var rawHeight = 0
         if (holder != null) {
             try {
                 holder.use { h ->
                     val retriever = h.retriever
                     val rotStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                     rotationDegrees = rotStr?.toIntOrNull() ?: 0
+                    rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
 
                     // Strategy 1: Android P+ Direct Frame Index (frame 0)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -403,13 +420,7 @@ class VideoFrameExtractor(private val context: Context) {
 
         val resolvedBmp = bmp
         if (resolvedBmp != null) {
-            var finalBmp: Bitmap = resolvedBmp
-            if (rotationDegrees != 0) {
-                try {
-                    val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-                    finalBmp = Bitmap.createBitmap(resolvedBmp, 0, 0, resolvedBmp.width, resolvedBmp.height, matrix, true)
-                } catch (ignored: Throwable) {}
-            }
+            var finalBmp: Bitmap = correctBitmapOrientation(resolvedBmp, rotationDegrees, rawWidth, rawHeight)
 
             // Normalize dimensions for smooth mobile tracking
             val maxDim = 800
@@ -446,6 +457,8 @@ class VideoFrameExtractor(private val context: Context) {
                     val retriever = h.retriever
                     val rotStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
                     rotationDegrees = rotStr?.toIntOrNull() ?: 0
+                    val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
 
                     var durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
                     if (durationMs <= 0L) {
@@ -499,13 +512,7 @@ class VideoFrameExtractor(private val context: Context) {
 
                         if (rawBmp != null) {
                             val validBmp: Bitmap = rawBmp
-                            var processedBmp: Bitmap = validBmp
-                            if (rotationDegrees != 0) {
-                                try {
-                                    val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-                                    processedBmp = Bitmap.createBitmap(validBmp, 0, 0, validBmp.width, validBmp.height, matrix, true)
-                                } catch (ignored: Throwable) {}
-                            }
+                            val processedBmp: Bitmap = correctBitmapOrientation(validBmp, rotationDegrees, rawWidth, rawHeight)
 
                             val scaled = if (processedBmp.width > targetWidth) {
                                 val ratio = targetWidth.toFloat() / processedBmp.width
@@ -526,6 +533,47 @@ class VideoFrameExtractor(private val context: Context) {
         }
 
         frames
+    }
+
+    /**
+     * Corrects bitmap orientation using video rotation metadata, ensuring we never
+     * double-rotate frames that were already oriented by the underlying decoder or OS.
+     */
+    private fun correctBitmapOrientation(
+        rawBmp: Bitmap,
+        rotationDegrees: Int,
+        rawWidth: Int = 0,
+        rawHeight: Int = 0
+    ): Bitmap {
+        if (rotationDegrees == 0) return rawBmp
+
+        val needsRotate = when (rotationDegrees) {
+            90, 270 -> {
+                if (rawWidth > 0 && rawHeight > 0) {
+                    if (rawWidth > rawHeight) {
+                        rawBmp.width >= rawBmp.height
+                    } else {
+                        rawBmp.height >= rawBmp.width
+                    }
+                } else {
+                    true
+                }
+            }
+            180 -> true
+            else -> false
+        }
+
+        return if (needsRotate) {
+            try {
+                val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                Bitmap.createBitmap(rawBmp, 0, 0, rawBmp.width, rawBmp.height, matrix, true)
+            } catch (e: Exception) {
+                Log.w(tag, "Failed to rotate bitmap by $rotationDegrees degrees", e)
+                rawBmp
+            }
+        } else {
+            rawBmp
+        }
     }
 
     /**

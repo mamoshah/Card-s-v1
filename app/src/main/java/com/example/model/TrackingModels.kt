@@ -75,7 +75,8 @@ enum class TrackingState {
     OCCLUDED_COASTING,
     OCCLUSION_STACK,
     REACQUIRING,
-    LOST
+    LOST,
+    UNRELIABLE
 }
 
 /**
@@ -115,7 +116,8 @@ data class TrackedFrame(
     val velocityY: Float = 0f,
     val speed: Float = 0f,
     val smoothedCenter: NormalizedPoint = center,
-    val bitmap: Bitmap? = null
+    val bitmap: Bitmap? = null,
+    val isUnreliable: Boolean = (trackingState == TrackingState.UNRELIABLE || confidence < 0.85f)
 )
 
 /**
@@ -134,24 +136,24 @@ enum class CardPosition(val id: Int, val nameEn: String, val nameAr: String) {
 
     val defaultCenterX: Float
         get() = when (this) {
-            LEFT -> 0.43f
-            MIDDLE -> 0.57f
-            RIGHT -> 0.71f
+            LEFT -> 0.430f
+            MIDDLE -> 0.575f
+            RIGHT -> 0.720f
         }
 
     val defaultCenterY: Float get() = 0.65f
 
     /**
      * Relative coordinates anchored directly over the game cards inside active video frame:
-     *  - Card 1 (Left): Relative X [0.36 .. 0.50], Y [0.45 .. 0.85]
-     *  - Card 2 (Middle): Relative X [0.50 .. 0.64], Y [0.45 .. 0.85]
-     *  - Card 3 (Right): Relative X [0.64 .. 0.78], Y [0.45 .. 0.85]
+     *  - Card 1 (Left): Center = 0.430f, X [0.36 .. 0.50], Y [0.45 .. 0.85]
+     *  - Card 2 (Middle): Center = 0.575f, X [0.505 .. 0.645], Y [0.45 .. 0.85]
+     *  - Card 3 (Right): Center = 0.720f, X [0.65 .. 0.79], Y [0.45 .. 0.85]
      */
     fun getPreconfiguredRect(): NormalizedRect {
         return when (this) {
             LEFT -> NormalizedRect(left = 0.36f, top = 0.45f, right = 0.50f, bottom = 0.85f)
-            MIDDLE -> NormalizedRect(left = 0.50f, top = 0.45f, right = 0.64f, bottom = 0.85f)
-            RIGHT -> NormalizedRect(left = 0.64f, top = 0.45f, right = 0.78f, bottom = 0.85f)
+            MIDDLE -> NormalizedRect(left = 0.505f, top = 0.45f, right = 0.645f, bottom = 0.85f)
+            RIGHT -> NormalizedRect(left = 0.65f, top = 0.45f, right = 0.79f, bottom = 0.85f)
         }
     }
 
@@ -164,13 +166,13 @@ enum class CardPosition(val id: Int, val nameEn: String, val nameAr: String) {
 
         /**
          * Resolves position by normalized X coordinate:
-         * Card 1: < 0.50
-         * Card 2: 0.50 .. 0.64
-         * Card 3: >= 0.64
+         * Position 1 (Left): X < 0.5025f (Anchor center = 0.430f)
+         * Position 2 (Middle): 0.5025f <= X <= 0.6475f (Anchor center = 0.575f)
+         * Position 3 (Right): X > 0.6475f (Anchor center = 0.720f)
          */
         fun fromX(x: Float): CardPosition = when {
-            x < 0.50f -> LEFT
-            x in 0.50f..0.64f -> MIDDLE
+            x < 0.5025f -> LEFT
+            x in 0.5025f..0.6475f -> MIDDLE
             else -> RIGHT
         }
 
@@ -190,23 +192,25 @@ enum class CardPosition(val id: Int, val nameEn: String, val nameAr: String) {
         }
 
         /**
-         * Transition with hysteresis deadbands to suppress jitter
+         * Transition with hysteresis thresholds:
+         * Left/Middle boundary midpoint: 0.5025f (hysteresis [0.495f, 0.5025f])
+         * Middle/Right boundary midpoint: 0.6475f (hysteresis [0.640f, 0.6475f])
          */
         fun transition(current: CardPosition, x: Float): CardPosition {
             return when (current) {
                 LEFT -> when {
-                    x > 0.64f -> RIGHT
-                    x > 0.52f -> MIDDLE
+                    x > 0.6475f -> RIGHT
+                    x >= 0.5025f -> MIDDLE
                     else -> LEFT
                 }
                 MIDDLE -> when {
-                    x < 0.48f -> LEFT
-                    x > 0.66f -> RIGHT
+                    x < 0.495f -> LEFT
+                    x > 0.6475f -> RIGHT
                     else -> MIDDLE
                 }
                 RIGHT -> when {
-                    x < 0.48f -> LEFT
-                    x < 0.62f -> MIDDLE
+                    x < 0.495f -> LEFT
+                    x <= 0.640f -> MIDDLE
                     else -> RIGHT
                 }
             }
@@ -286,6 +290,22 @@ data class FingerprintUsageEvent(
 }
 
 /**
+ * Detailed technical diagnostic cause for failure or uncertainty event
+ */
+data class FailureCause(
+    val frameIndex: Int,
+    val timestampMs: Long,
+    val reason: String,
+    val metricDetails: String
+) {
+    fun toDiagnosticString(): String {
+        val seconds = timestampMs / 1000f
+        val timeFormatted = String.format(java.util.Locale.US, "%02d:%04.1fs", (seconds / 60).toInt(), seconds % 60)
+        return "• Frame $frameIndex (Time: $timeFormatted): $reason | Details: $metricDetails"
+    }
+}
+
+/**
  * Complete result output of the tracking engine
  */
 data class TrackingResult(
@@ -308,8 +328,13 @@ data class TrackingResult(
     val averageSpeed: Float = 0f,
     val moveHistory: List<CardMoveLog> = emptyList(),
     val fingerprintEvents: List<FingerprintUsageEvent> = emptyList(),
-    val targetFingerprint: TrackedTargetFingerprint? = null
-)
+    val targetFingerprint: TrackedTargetFingerprint? = null,
+    val failureCauses: List<FailureCause> = emptyList(),
+    val isUnreliable: Boolean = false
+) {
+    val isFailedOrUnreliable: Boolean
+        get() = isUnreliable || averageConfidence < 0.85f || lostLockFlag || confidenceLevel == ConfidenceLevel.LOW
+}
 
 /**
  * Metadata for benchmark / sample shuffle video

@@ -34,7 +34,8 @@ enum class AppScreen {
     UPLOAD,
     SELECT_TARGET,
     TRACKING_PROGRESS,
-    RESULT_VIEW
+    RESULT_VIEW,
+    VIDEO_DETAILS
 }
 
 data class TargetSelectionState(
@@ -87,6 +88,11 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
     private val _activeVideoTitle = MutableStateFlow("Benchmark Shuffle")
     val activeVideoTitle: StateFlow<String> = _activeVideoTitle.asStateFlow()
 
+    private val _currentVideoMetadata = MutableStateFlow<com.example.video.VideoMetadata?>(null)
+    val currentVideoMetadata: StateFlow<com.example.video.VideoMetadata?> = _currentVideoMetadata.asStateFlow()
+
+    private var previousScreenBeforeDetails: AppScreen = AppScreen.RESULT_VIEW
+
     private var loadedFrames: List<Bitmap> = emptyList()
     private var cachedVideoFile: File? = null
     private var cachedVideoUri: Uri? = null
@@ -134,6 +140,16 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
             }
             loadedFrames = frames
 
+            _currentVideoMetadata.value = com.example.video.VideoMetadata(
+                durationMs = (benchmark.durationSec * 1000).toLong(),
+                width = 1280,
+                height = 720,
+                rotation = 0,
+                mimeType = "video/mp4",
+                rawWidth = 1280,
+                rawHeight = 720
+            )
+
             if (frames.isNotEmpty()) {
                 val first = frames.first()
                 val defaultPos = CardPosition.MIDDLE
@@ -175,6 +191,7 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                 cachedVideoFile = cachedFile
 
                 val metadata = frameExtractor.getMetadata(cachedFile, uri)
+                _currentVideoMetadata.value = metadata
                 if (metadata != null && metadata.durationMs > 90_000L) {
                     _errorMessage.value = "Video is long (${(metadata.durationMs / 1000)}s). For optimal mobile tracking performance, clips under 60 seconds are recommended."
                 }
@@ -379,6 +396,9 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                 else -> ConfidenceLevel.LOW
             }
 
+            // Finalize movement tracking on the final settled frame
+            movementTracker.finalizeTracking(finalFrame)
+
             // Estimate final resting slot via movementTracker and position mapping
             val finalSlot = movementTracker.getCurrentPosition().displayLabel
             val moveHistory = movementTracker.getMoveHistory()
@@ -525,6 +545,21 @@ class CardTrackerViewModel(application: Application) : AndroidViewModel(applicat
                 delay(frameDelayMs)
             }
         }
+    }
+
+    /**
+     * Navigates to dedicated full-screen Video Details page.
+     */
+    fun showVideoDetails(fromScreen: AppScreen = _currentScreen.value) {
+        previousScreenBeforeDetails = fromScreen
+        _currentScreen.value = AppScreen.VIDEO_DETAILS
+    }
+
+    /**
+     * Returns from Video Details screen back to the previous screen while preserving state.
+     */
+    fun closeVideoDetails() {
+        _currentScreen.value = previousScreenBeforeDetails
     }
 
     /**

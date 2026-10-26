@@ -2,6 +2,7 @@ package com.example.engine
 
 import com.example.model.CardMoveLog
 import com.example.model.CardPosition
+import com.example.model.FailureCause
 import com.example.model.FingerprintUsageEvent
 import com.example.model.TrackedFrame
 import java.util.Locale
@@ -15,26 +16,39 @@ import kotlin.math.max
  *  - Position 2 = Middle / Center (الوسط)
  *  - Position 3 = Right (اليمين)
  *
- * Detects frame-by-frame position transitions with hysteresis to suppress
- * boundary micro-jitter, and builds structured diagnostic log entries.
+ * Includes Frame-0/1 motion debouncing, velocity gating (> 0.15 screens/s, delta > 3 frames),
+ * and structured [FAILURE / UNCERTAINTY CAUSE ANALYSIS] diagnostic logging.
  */
 class CardMovementTracker {
 
     private var currentPosition: CardPosition = CardPosition.MIDDLE
+    private var initialAnchorPosition: CardPosition = CardPosition.MIDDLE
     private val moves = mutableListOf<CardMoveLog>()
+    private val failureCauses = mutableListOf<FailureCause>()
     private var isInitialized = false
 
+    // Debouncing state
+    private var candidatePosition: CardPosition? = null
+    private var candidateFramesCount: Int = 0
+    private var candidateStartFrame: Int = 0
+
     /**
-     * Initializes tracking with the starting frame
+     * Initializes tracking with the starting frame and anchor lock.
      */
-    fun init(initialFrame: TrackedFrame) {
-        currentPosition = CardPosition.fromX(initialFrame.center.x)
+    fun init(initialFrame: TrackedFrame, explicitInitialPosition: CardPosition? = null) {
+        val resolved = explicitInitialPosition ?: CardPosition.fromX(initialFrame.center.x)
+        initialAnchorPosition = resolved
+        currentPosition = resolved
         moves.clear()
+        failureCauses.clear()
+        candidatePosition = null
+        candidateFramesCount = 0
+        candidateStartFrame = 0
         isInitialized = true
     }
 
     /**
-     * Evaluates a frame for card position transitions
+     * Evaluates a frame for card position transitions with velocity gating and frame debouncing.
      */
     fun processFrame(frame: TrackedFrame): CardMoveLog? {
         if (!isInitialized) {
@@ -42,59 +56,95 @@ class CardMovementTracker {
             return null
         }
 
-        val nextPosition = CardPosition.transition(currentPosition, frame.center.x)
-        if (nextPosition != currentPosition) {
+        // Uncertainty & Failure Cause Logging
+        if (frame.isUnreliable || frame.confidence < 0.85f) {
+            val reason = when {
+                frame.inlierCount < 3 -> "Optical Flow Consensus Loss during Frame ${frame.frameIndex}"
+                frame.speed > 0.15f -> "High Velocity Crossover Ambiguity during Frame ${frame.frameIndex}"
+                else -> "ZNCC Template Match Below Threshold (confidence ${(frame.confidence * 100).toInt()}%)"
+            }
+            val details = "Inliers=${frame.inlierCount}, Speed=${String.format(Locale.US, "%.2f", frame.speed)} screens/s, State=${frame.trackingState}"
+            if (failureCauses.none { it.frameIndex == frame.frameIndex }) {
+                failureCauses.add(FailureCause(frame.frameIndex, frame.timestampMs, reason, details))
+            }
+        }
+
+        // Frame-0/1 Motion Debouncing & Lock Fix:
+        // Ignore displacement noise unless velocity > 0.15 screens/s and delta > 3 frames to eliminate false t=0s jumps
+        val nextCandidate = CardPosition.transition(currentPosition, frame.center.x)
+        if (nextCandidate != currentPosition) {
+            val isStartup = frame.frameIndex <= 2 || frame.timestampMs < 150L
+            if (isStartup) {
+                if (candidatePosition == nextCandidate) {
+                    candidateFramesCount++
+                } else {
+                    candidatePosition = nextCandidate
+                    candidateFramesCount = 1
+                    candidateStartFrame = frame.frameIndex
+                }
+
+                // On startup frames, ignore noise unless velocity > 0.15 and delta > 3 frames
+                if (candidateFramesCount <= 3 && frame.speed <= 0.15f) {
+                    return null
+                }
+            }
+
             val move = CardMoveLog(
                 moveNumber = moves.size + 1,
                 fromPosition = currentPosition,
-                toPosition = nextPosition,
+                toPosition = nextCandidate,
                 frameIndex = frame.frameIndex,
                 timestampMs = frame.timestampMs,
                 confidence = frame.confidence,
                 speed = frame.speed
             )
             moves.add(move)
-            currentPosition = nextPosition
+            currentPosition = nextCandidate
+            candidatePosition = null
+            candidateFramesCount = 0
             return move
+        } else {
+            candidatePosition = null
+            candidateFramesCount = 0
         }
         return null
     }
 
     /**
-     * Current detected card position
+     * Finalizes tracking on the terminal frame to guarantee the final resting position
+     * matches the card's final spatial coordinates.
      */
+    fun finalizeTracking(finalFrame: TrackedFrame? = null): CardMoveLog? {
+        if (finalFrame == null) return null
+        val finalPos = CardPosition.fromX(finalFrame.center.x)
+        if (finalPos != currentPosition) {
+            val move = CardMoveLog(
+                moveNumber = moves.size + 1,
+                fromPosition = currentPosition,
+                toPosition = finalPos,
+                frameIndex = finalFrame.frameIndex,
+                timestampMs = finalFrame.timestampMs,
+                confidence = finalFrame.confidence,
+                speed = finalFrame.speed
+            )
+            moves.add(move)
+            currentPosition = finalPos
+            return move
+        }
+        return null
+    }
+
     fun getCurrentPosition(): CardPosition = currentPosition
-
-    /**
-     * All detected movement transition logs
-     */
     fun getMoveHistory(): List<CardMoveLog> = moves.toList()
+    fun getFailureCauses(): List<FailureCause> = failureCauses.toList()
+
+    fun logFailureCause(cause: FailureCause) {
+        failureCauses.add(cause)
+    }
 
     /**
-     * Generates comprehensive AI-style analytical diagnostic report:
-     * --------------------------------------------------
-     * [TRACKING DIAGNOSTIC REPORT]
-     * • Target Card: Selected Position (Left/Middle/Right)
-     * • Initial Coordinates: x=X%, y=Y% (Target Locked)
-     * --------------------------------------------------
-     * [SEQUENTIAL MOVEMENT ANALYSIS]
-     * • Move 1: Pos X -> Pos Y | Frame # (Time: 00:00.0s) | Velocity: V
-     * • Move 2: Pos Y -> Pos Z | Frame # (Time: 00:00.0s) | Velocity: V
-     * --------------------------------------------------
-     * [VISUAL FINGERPRINT & RE-ACQUISITION LOG] (if used)
-     * • Target Fingerprint: Locked at Position 2 (Middle) (Frame 0)
-     * • Fingerprint Re-Acquisition: Target Pos 2 | Frame 40-48 ...
-     * --------------------------------------------------
-     * [FINAL EVALUATION & VERDICT]
-     * • Shuffle Completed: Total Moves = N
-     * • Final Card Position: Position X (Left / Middle / Right)
-     * • Tracking Confidence: 93%
-     * --------------------------------------------------
-     * [KINEMATIC METRICS SUMMARY]
-     * • Processed Frames: N frames in T ms (Average FPS: X.Y)
-     * • Peak Speed: X.XX screens/s | Total Displacement: Y%
-     * • Occlusion Events Handled: N
-     * --------------------------------------------------
+     * Generates comprehensive AI-style analytical diagnostic report with dedicated
+     * [FAILURE / UNCERTAINTY CAUSE ANALYSIS] section.
      */
     fun generateAiAnalyticalReport(
         targetCardLabel: String = "Position 2 (Middle)",
@@ -138,6 +188,24 @@ class CardMovementTracker {
             lines.add(separator)
         }
 
+        // FAILURE / UNCERTAINTY CAUSE ANALYSIS SECTION (NEW)
+        lines.add("[FAILURE / UNCERTAINTY CAUSE ANALYSIS]")
+        if (failureCauses.isNotEmpty()) {
+            lines.add("• Status: UNRELIABLE / TRANSIENT UNCERTAINTY DETECTED")
+            lines.add("• Total Uncertainty Events Logged: ${failureCauses.size}")
+            for (cause in failureCauses.take(8)) {
+                lines.add(cause.toDiagnosticString())
+            }
+            if (failureCauses.size > 8) {
+                lines.add("• ... and ${failureCauses.size - 8} additional transient optical flow flags.")
+            }
+        } else {
+            lines.add("• Status: STABLE & VERIFIED (Zero critical tracking failures)")
+            lines.add("• Optical Flow Consensus: High consensus maintained across all evaluated motion frames.")
+            lines.add("• Template Correlation: ZNCC visual signature verified across candidate slots.")
+        }
+        lines.add(separator)
+
         lines.add("[FINAL EVALUATION & VERDICT]")
         lines.add("• Shuffle Completed: Total Moves = ${moves.size}")
         lines.add("• Final Card Position: ${currentPosition.displayLabel}")
@@ -166,9 +234,6 @@ class CardMovementTracker {
         return lines
     }
 
-    /**
-     * Backward-compatible delegation to generateAiAnalyticalReport
-     */
     fun generateConsoleLogs(
         totalFrames: Int,
         totalDurationMs: Long,

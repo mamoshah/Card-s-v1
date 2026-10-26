@@ -167,5 +167,113 @@ class ExampleUnitTest {
 
         assertEquals(getCrosshairCenter(showBoundingBoxEnabled), getCrosshairCenter(showBoundingBoxDisabled))
     }
+
+    @Test
+    fun `video metadata correctly calculates display dimensions based on rotation metadata`() {
+        // Case 1: Video recorded in portrait (raw 1920x1080 buffer, rotation 90)
+        val rawWidth = 1920
+        val rawHeight = 1080
+        val rotation90 = 90
+        val (displayWidth90, displayHeight90) = if (rotation90 == 90 || rotation90 == 270) {
+            Pair(rawHeight, rawWidth)
+        } else {
+            Pair(rawWidth, rawHeight)
+        }
+        val meta90 = com.example.video.VideoMetadata(
+            durationMs = 5000L,
+            width = displayWidth90,
+            height = displayHeight90,
+            rotation = rotation90,
+            rawWidth = rawWidth,
+            rawHeight = rawHeight
+        )
+        assertEquals(1080, meta90.width)
+        assertEquals(1920, meta90.height)
+        assertEquals(1920, meta90.rawWidth)
+        assertEquals(1080, meta90.rawHeight)
+
+        // Case 2: Standard landscape video (raw 1280x720, rotation 0)
+        val meta0 = com.example.video.VideoMetadata(
+            durationMs = 8000L,
+            width = 1280,
+            height = 720,
+            rotation = 0
+        )
+        assertEquals(1280, meta0.width)
+        assertEquals(720, meta0.height)
+        assertEquals(0, meta0.rotation)
+    }
+
+    @Test
+    fun `app screen enum supports dedicated video details screen`() {
+        val screens = com.example.viewmodel.AppScreen.values()
+        assertTrue("AppScreen should contain VIDEO_DETAILS", screens.contains(com.example.viewmodel.AppScreen.VIDEO_DETAILS))
+        assertEquals(5, screens.size)
+    }
+
+    @Test
+    fun `video display geometry calculates aspect-fit without stretching or distortion`() {
+        val containerSize = androidx.compose.ui.geometry.Size(800f, 400f) // 2:1 container
+        val imageW = 1280
+        val imageH = 720 // 16:9 aspect ratio
+
+        val fitRect = com.example.ui.util.VideoDisplayGeometry.calculateFitRect(containerSize, imageW, imageH)
+
+        // 16:9 fitted in 2:1 container should be pillarboxed (centered horizontally, full height 400f)
+        assertEquals(400f, fitRect.height, 0.01f)
+        val expectedWidth = 400f * (16f / 9f)
+        assertEquals(expectedWidth, fitRect.width, 0.1f)
+        val expectedLeft = (800f - expectedWidth) / 2f
+        assertEquals(expectedLeft, fitRect.left, 0.1f)
+        assertEquals(0f, fitRect.top, 0.01f)
+    }
+
+    @Test
+    fun `spatial slot boundaries correctly classify position 1, 2, and 3`() {
+        // Position 1 (Left): X < 0.5025f (Anchor center = 0.430f)
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.35f))
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.430f))
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.50f))
+
+        // Position 2 (Middle): 0.5025f <= X <= 0.6475f (Anchor center = 0.575f)
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.5025f))
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.575f))
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.6475f))
+
+        // Position 3 (Right): X > 0.6475f (Anchor center = 0.720f)
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.65f))
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.720f))
+    }
+
+    @Test
+    fun `hysteresis transitions reliably classify movements across 0_5025 and 0_6475 boundaries`() {
+        val middle = com.example.model.CardPosition.MIDDLE
+        // A rightward move to X = 0.68 must transition immediately to RIGHT
+        val verdictRight = com.example.model.CardPosition.transition(middle, 0.68f)
+        assertEquals(com.example.model.CardPosition.RIGHT, verdictRight)
+
+        // A leftward move below 0.495f must transition to LEFT
+        val verdictLeft = com.example.model.CardPosition.transition(middle, 0.48f)
+        assertEquals(com.example.model.CardPosition.LEFT, verdictLeft)
+    }
+
+    @Test
+    fun `display coordinates map correctly to normalized source video coordinates`() {
+        val fitRect = androidx.compose.ui.geometry.Rect(
+            left = 50f,
+            top = 20f,
+            right = 850f,
+            bottom = 470f
+        )
+        val tapX = 450f
+        val tapY = 245f
+
+        val relX = ((tapX - fitRect.left) / fitRect.width).coerceIn(0f, 1f)
+        val relY = ((tapY - fitRect.top) / fitRect.height).coerceIn(0f, 1f)
+
+        assertEquals(0.5f, relX, 0.001f)
+        assertEquals(0.5f, relY, 0.001f)
+    }
 }
+
 

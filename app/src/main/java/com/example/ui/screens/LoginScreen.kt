@@ -79,86 +79,97 @@ fun LoginScreen(
                 ),
             contentAlignment = Alignment.Center
         ) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(scrollState)
-                    .padding(horizontal = 24.dp, vertical = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Logo at Top (Brand Image with Red Glow)
-                Box(
+                // Left Column: Logo & Header info
+                Column(
                     modifier = Modifier
-                        .size(140.dp)
-                        .shadow(
-                            elevation = 28.dp,
-                            shape = CircleShape,
-                            spotColor = CrimsonRed,
-                            ambientColor = NeonRedGlow
-                        )
-                        .clip(CircleShape)
-                        .background(BrandPitchBlack)
-                        .border(
-                            BorderStroke(
-                                2.5.dp,
-                                Brush.sweepGradient(
-                                    listOf(
-                                        CrimsonRed,
-                                        DarkCrimson,
-                                        BrandPitchBlack,
-                                        CrimsonRed
-                                    )
-                                )
-                            ),
-                            CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_login_brand_logo),
-                        contentDescription = "Mtsho Hunt Logo",
+                    // Logo at Top (Brand Image with Red Glow)
+                    Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                        contentScale = ContentScale.Crop
+                            .size(110.dp)
+                            .shadow(
+                                elevation = 24.dp,
+                                shape = CircleShape,
+                                spotColor = CrimsonRed,
+                                ambientColor = NeonRedGlow
+                            )
+                            .clip(CircleShape)
+                            .background(BrandPitchBlack)
+                            .border(
+                                BorderStroke(
+                                    2.dp,
+                                    Brush.sweepGradient(
+                                        listOf(
+                                            CrimsonRed,
+                                            DarkCrimson,
+                                            BrandPitchBlack,
+                                            CrimsonRed
+                                        )
+                                    )
+                                ),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_login_brand_logo),
+                            contentDescription = "Mtsho Hunt Logo",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Static Main Title Text as strictly specified
+                    Text(
+                        text = "Enter information to connect to the server",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        ),
+                        color = Color.White,
+                        textAlign = TextAlign.Center
+                    )
+
+                    // Subtitle indicating the active step
+                    Text(
+                        text = if (uiState.currentStep == AuthStep.STEP_ONE_HOST) {
+                            "Step 1: Host Name Verification"
+                        } else {
+                            "Step 2: Server Access Password"
+                        },
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            letterSpacing = 1.sp
+                        ),
+                        color = NeonRedGlow,
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(22.dp))
-
-                // Static Main Title Text as strictly specified
-                Text(
-                    text = "Enter information to connect to the server",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    ),
-                    color = Color.White,
-                    textAlign = TextAlign.Center
-                )
-
-                // Subtitle indicating the active step
-                Text(
-                    text = if (uiState.currentStep == AuthStep.STEP_ONE_HOST) {
-                        "Step 1: Host Name Verification"
-                    } else {
-                        "Step 2: Server Access Password"
-                    },
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        letterSpacing = 1.sp
-                    ),
-                    color = NeonRedGlow,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
-
-                Spacer(modifier = Modifier.height(26.dp))
-
-                // Main Connection Card Container
-                Card(
+                // Right Column: Main Connection Card Container
+                Column(
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .fillMaxHeight()
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
@@ -518,4 +529,5 @@ fun LoginScreen(
             }
         }
     }
+}
 }

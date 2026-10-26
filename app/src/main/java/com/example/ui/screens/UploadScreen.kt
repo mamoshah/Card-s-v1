@@ -5,14 +5,17 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -24,22 +27,30 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.engine.BenchmarkVideoProvider
-import com.example.model.BenchmarkVideo
-import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import com.example.R
 import com.example.data.local.UserEntity
+import com.example.engine.BenchmarkVideoProvider
+import com.example.model.BenchmarkVideo
 import com.example.ui.theme.*
 
+/**
+ * Landscape-Optimized Video Upload & Benchmark Selection Screen.
+ *
+ * Implements:
+ * - Two-column landscape split layout.
+ * - Left Panel: App branding header, User account status, and Video Import Drop Zone
+ *   (supports Android Photo Picker and system storage pickers for MP4, MOV, MKV, etc.).
+ * - Right Panel: Pre-configured benchmark test video sequences and tracking engine specifications.
+ */
 @Composable
 fun UploadScreen(
     isImportingVideo: Boolean,
@@ -147,16 +158,24 @@ fun UploadScreen(
         containerColor = DarkBackground,
         contentWindowInsets = WindowInsets.safeDrawing
     ) { padding ->
-        LazyColumn(
+        Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-                // App Brand Header with Mtsho Hunt Logo & User Logout
+            // ==========================================
+            // LEFT PANEL: Brand, User status, Upload Card
+            // ==========================================
+            Column(
+                modifier = Modifier
+                    .weight(1.05f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Brand Header with User Logout
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -164,13 +183,13 @@ fun UploadScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .border(1.5.dp, CrimsonRed, RoundedCornerShape(14.dp))
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.5.dp, CrimsonRed, RoundedCornerShape(12.dp))
                                 .background(BrandPitchBlack),
                             contentAlignment = Alignment.Center
                         ) {
@@ -179,7 +198,7 @@ fun UploadScreen(
                                 contentDescription = "Mtsho Hunt Logo",
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clip(RoundedCornerShape(14.dp)),
+                                    .clip(RoundedCornerShape(12.dp)),
                                 contentScale = ContentScale.Crop
                             )
                         }
@@ -190,7 +209,7 @@ fun UploadScreen(
                                     text = "MTSHO HUNT",
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.Black,
-                                        letterSpacing = 1.2.sp
+                                        letterSpacing = 1.1.sp
                                     ),
                                     color = TextPrimary
                                 )
@@ -203,17 +222,17 @@ fun UploadScreen(
                                     Text(
                                         text = "PRO CV",
                                         color = NeonRedGlow,
-                                        fontSize = 10.sp,
+                                        fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                     )
                                 }
                             }
                             Text(
-                                text = "Optical Flow Tracking & Occlusion Diagnostic",
+                                text = "Optical Flow Tracking & Occlusion Diagnostics",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary,
-                                fontSize = 11.sp
+                                fontSize = 10.sp
                             )
                         }
                     }
@@ -226,23 +245,23 @@ fun UploadScreen(
                         if (currentUser != null) {
                             Surface(
                                 color = DarkSurfaceElevated,
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(8.dp),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkRedBorder)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Person,
                                         contentDescription = null,
                                         tint = CrimsonRed,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(12.dp)
                                     )
                                     Text(
                                         text = currentUser.displayName.ifBlank { currentUser.username },
-                                        fontSize = 11.sp,
+                                        fontSize = 10.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = TextPrimary,
                                         maxLines = 1
@@ -254,65 +273,61 @@ fun UploadScreen(
                         IconButton(
                             onClick = onLogout,
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
                                 .background(DarkRedContainer)
-                                .border(1.dp, CrimsonRed.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .border(1.dp, CrimsonRed.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                                 .testTag("logout_button")
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Logout,
                                 contentDescription = "Logout",
                                 tint = NeonRedGlow,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
                 }
-            }
 
-            // Error Banner if present
-            if (errorMessage != null) {
-                item {
+                // Error Banner if present
+                if (errorMessage != null) {
                     Surface(
                         color = CoralAlert.copy(alpha = 0.15f),
                         border = androidx.compose.foundation.BorderStroke(1.dp, CoralAlert.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(10.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
+                                .padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.Warning, contentDescription = "Error", tint = CoralAlert)
+                            Icon(Icons.Default.Warning, contentDescription = "Error", tint = CoralAlert, modifier = Modifier.size(18.dp))
                             Text(
                                 text = errorMessage,
                                 color = TextPrimary,
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(onClick = onDismissError) {
-                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextSecondary)
+                            IconButton(onClick = onDismissError, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextSecondary, modifier = Modifier.size(14.dp))
                             }
                         }
                     }
                 }
-            }
 
-            // Upload Video Drop Zone Card
-            item {
+                // Upload Video Drop Zone Card
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .border(
                             1.5.dp,
                             Brush.verticalGradient(
                                 listOf(CrimsonRed.copy(alpha = 0.7f), DarkRedBorder)
                             ),
-                            RoundedCornerShape(20.dp)
+                            RoundedCornerShape(16.dp)
                         )
                         .clickable {
                             pickVisualMediaLauncher.launch(
@@ -325,13 +340,13 @@ fun UploadScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(22.dp),
+                            .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(64.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(DarkRedContainer),
                             contentAlignment = Alignment.Center
@@ -340,7 +355,7 @@ fun UploadScreen(
                                 imageVector = Icons.Default.CloudUpload,
                                 contentDescription = "Upload Icon",
                                 tint = NeonRedGlow,
-                                modifier = Modifier.size(36.dp)
+                                modifier = Modifier.size(28.dp)
                             )
                         }
 
@@ -351,30 +366,31 @@ fun UploadScreen(
                         )
 
                         Text(
-                            text = "Supports all video formats: MP4, MKV, WebM, MOV, 3GP, AVI, Screen Recordings, and all mobile captures.",
+                            text = "Supports MP4, MKV, WebM, MOV, 3GP, AVI, screen captures & shuffle recordings.",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            fontSize = 11.sp
                         )
 
                         // Format compatibility tags
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            listOf("ALL FORMATS", "MP4 / MKV", "H.264 / HEVC", "SCREEN RECS").forEach { badge ->
+                            listOf("ALL FORMATS", "MP4 / MOV", "H.264 / HEVC").forEach { badge ->
                                 Surface(
                                     color = DarkRedContainer.copy(alpha = 0.5f),
-                                    shape = RoundedCornerShape(6.dp),
+                                    shape = RoundedCornerShape(4.dp),
                                     border = androidx.compose.foundation.BorderStroke(1.dp, CrimsonRed.copy(alpha = 0.35f))
                                 ) {
                                     Text(
                                         text = badge,
-                                        fontSize = 9.sp,
+                                        fontSize = 8.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
                                         color = NeonRedGlow,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                                     )
                                 }
                             }
@@ -382,9 +398,8 @@ fun UploadScreen(
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            // Primary Photo/Video Picker Button
                             Button(
                                 onClick = {
                                     pickVisualMediaLauncher.launch(
@@ -395,233 +410,215 @@ fun UploadScreen(
                                     containerColor = CrimsonRed,
                                     contentColor = Color.White
                                 ),
-                                shape = RoundedCornerShape(12.dp),
+                                shape = RoundedCornerShape(10.dp),
                                 modifier = Modifier
                                     .weight(1.1f)
-                                    .height(46.dp)
+                                    .height(40.dp)
                                     .testTag("choose_video_btn")
                             ) {
-                                Icon(Icons.Default.VideoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.VideoLibrary, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Gallery", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Gallery", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                             }
 
-                            // Secondary File Browser Picker Button (video/*)
                             OutlinedButton(
-                                onClick = {
-                                    getContentLauncher.launch("video/*")
-                                },
-                                shape = RoundedCornerShape(12.dp),
+                                onClick = { getContentLauncher.launch("video/*") },
+                                shape = RoundedCornerShape(10.dp),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = TextPrimary
-                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(46.dp)
+                                    .height(40.dp)
                                     .testTag("browse_files_btn")
                             ) {
-                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp), tint = TextSecondary)
+                                Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Videos", fontSize = 12.sp)
+                                Text("Videos", fontSize = 11.sp)
                             }
 
-                            // Tertiary File Browser Picker Button (*/*) for exotic containers
                             OutlinedButton(
-                                onClick = {
-                                    getAllFilesLauncher.launch("*/*")
-                                },
-                                shape = RoundedCornerShape(12.dp),
+                                onClick = { getAllFilesLauncher.launch("*/*") },
+                                shape = RoundedCornerShape(10.dp),
                                 border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder),
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = TextPrimary
-                                ),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(46.dp)
+                                    .height(40.dp)
                                     .testTag("browse_all_files_btn")
                             ) {
-                                Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(16.dp), tint = NeonCyan)
+                                Icon(Icons.Default.AttachFile, contentDescription = null, modifier = Modifier.size(14.dp), tint = NeonCyan)
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("All Files", fontSize = 12.sp)
+                                Text("All Files", fontSize = 11.sp)
                             }
                         }
                     }
                 }
             }
 
-            // Benchmark Section Header
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+            // ==========================================
+            // RIGHT PANEL: Benchmarks & Technical Specs
+            // ==========================================
+            LazyColumn(
+                modifier = Modifier
+                    .weight(0.95f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item {
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = null,
-                            tint = EmeraldAccent,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Instant Benchmark Sequences",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = TextPrimary
-                        )
-                    }
-
-                    Text(
-                        text = "Zero Setup",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = EmeraldAccent
-                    )
-                }
-
-                Text(
-                    text = "Evaluate optical flow tracking immediately with pre-configured card shuffle stress tests:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
-            // Benchmark Video Cards
-            items(BenchmarkVideoProvider.BENCHMARKS) { benchmark ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(16.dp))
-                        .clickable { onBenchmarkSelected(benchmark) }
-                        .testTag("benchmark_${benchmark.id}"),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = benchmark.title,
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = TextPrimary
-                            )
-
-                            val badgeColor = when (benchmark.difficulty) {
-                                "Normal" -> EmeraldAccent
-                                "Hard" -> AmberWarning
-                                else -> CoralAlert
-                            }
-                            Surface(
-                                color = badgeColor.copy(alpha = 0.15f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = benchmark.difficulty.uppercase(),
-                                    color = badgeColor,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                )
-                            }
-                        }
-
-                        Text(
-                            text = benchmark.description,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${benchmark.frameCount} frames",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = TextMuted
-                                )
-                                Text(
-                                    text = "•",
-                                    color = TextMuted
-                                )
-                                Text(
-                                    text = "${benchmark.durationSec}s",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = TextMuted
-                                )
-                            }
-
-                            FilledTonalButton(
-                                onClick = { onBenchmarkSelected(benchmark) },
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = DarkSurfaceElevated,
-                                    contentColor = NeonCyan
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Text("Load Benchmark", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Specs / Diagnostics Technical Note
-            item {
-                Surface(
-                    color = DarkSurface.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(14.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.Memory, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(18.dp))
+                            Icon(
+                                imageVector = Icons.Default.Speed,
+                                contentDescription = null,
+                                tint = EmeraldAccent,
+                                modifier = Modifier.size(18.dp)
+                            )
                             Text(
-                                text = "Optical Flow Tracking Engine Specs",
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                text = "Instant Benchmark Sequences",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = TextPrimary
                             )
                         }
 
                         Text(
-                            text = "• Multi-scale Pyramidal Lucas-Kanade (3-scale coarse-to-fine displacement resolution)\n" +
-                                    "• Forward-Backward Error Validation (filters out occluded feature vectors)\n" +
-                                    "• Normalized Cross-Correlation (NCC) template matching & distractor disambiguation\n" +
-                                    "• Momentum velocity coasting for fast hand occlusions & swaps",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary,
-                            lineHeight = 18.sp
+                            text = "Zero Setup",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = EmeraldAccent
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
+
+                // Benchmark Video Cards
+                items(BenchmarkVideoProvider.BENCHMARKS) { benchmark ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.dp, DarkSurfaceBorder, RoundedCornerShape(12.dp))
+                        .clickable { onBenchmarkSelected(benchmark) }
+                        .testTag("benchmark_${benchmark.id}"),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = benchmark.title,
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary
+                                )
+
+                                val badgeColor = when (benchmark.difficulty) {
+                                    "Normal" -> EmeraldAccent
+                                    "Hard" -> AmberWarning
+                                    else -> CoralAlert
+                                }
+                                Surface(
+                                    color = badgeColor.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = benchmark.difficulty.uppercase(),
+                                        color = badgeColor,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = benchmark.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                fontSize = 11.sp
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${benchmark.frameCount} frames • ${benchmark.durationSec}s",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
+                                    color = TextMuted,
+                                    fontSize = 10.sp
+                                )
+
+                                FilledTonalButton(
+                                    onClick = { onBenchmarkSelected(benchmark) },
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = DarkSurfaceElevated,
+                                        contentColor = NeonCyan
+                                    ),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Load", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Specs / Diagnostics Technical Note
+                item {
+                    Surface(
+                        color = DarkSurface.copy(alpha = 0.6f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, DarkSurfaceBorder)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.Memory, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = "Optical Flow Tracking Engine Specs",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = TextPrimary
+                                )
+                            }
+
+                            Text(
+                                text = "• Multi-scale Pyramidal Lucas-Kanade + Forward-Backward Error Validation\n" +
+                                        "• Normalized Cross-Correlation (NCC) template matching & distractor disambiguation\n" +
+                                        "• Velocity momentum coasting for fast hand occlusions & swaps\n" +
+                                        "• Calibrated 3-Card Spatial Slots: Pos 1 (<0.42), Pos 2 (0.42-0.58), Pos 3 (>0.58)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary,
+                                fontSize = 10.sp,
+                                lineHeight = 15.sp
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
             }
         }
     }

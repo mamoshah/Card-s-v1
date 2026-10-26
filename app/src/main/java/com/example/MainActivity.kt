@@ -1,5 +1,6 @@
 package com.example
 
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -18,6 +19,7 @@ import com.example.ui.screens.ResultScreen
 import com.example.ui.screens.TargetSelectionScreen
 import com.example.ui.screens.TrackingProgressScreen
 import com.example.ui.screens.UploadScreen
+import com.example.ui.screens.VideoDetailsScreen
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.AppScreen
@@ -27,6 +29,8 @@ import com.example.viewmodel.CardTrackerViewModel
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Force permanent landscape orientation across the entire app
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
@@ -116,7 +120,8 @@ fun CardTrackerApp(
                 onCardSelected = { viewModel.selectCardPosition(it) },
                 onConfirmTarget = { viewModel.startAnalysis() },
                 onBack = { viewModel.resetToUpload() },
-                onFrameTapped = { x, y -> viewModel.onFrameTapped(x, y) }
+                onFrameTapped = { x, y -> viewModel.onFrameTapped(x, y) },
+                onShowVideoDetails = { viewModel.showVideoDetails(AppScreen.SELECT_TARGET) }
             )
         }
 
@@ -146,11 +151,31 @@ fun CardTrackerApp(
                     onToggleTelemetryHud = { viewModel.toggleTelemetryHud() },
                     onRepickTarget = { viewModel.repickTarget() },
                     onRerun = { viewModel.startAnalysis() },
-                    onResetToUpload = { viewModel.resetToUpload() }
+                    onResetToUpload = { viewModel.resetToUpload() },
+                    onShowVideoDetails = { viewModel.showVideoDetails(AppScreen.RESULT_VIEW) }
                 )
             } else {
                 viewModel.resetToUpload()
             }
+        }
+
+        AppScreen.VIDEO_DETAILS -> {
+            val metadata by viewModel.currentVideoMetadata.collectAsState()
+            VideoDetailsScreen(
+                videoTitle = activeTitle,
+                metadata = metadata,
+                result = trackingResult,
+                selectionState = selectionState,
+                playbackState = playbackState,
+                onSeek = { viewModel.seekToFrame(it) },
+                onTogglePlay = { viewModel.togglePlayback() },
+                onSpeedChange = { viewModel.setPlaybackSpeed(it) },
+                onTrailEffectChange = { viewModel.setTrailEffect(it) },
+                onToggleBoundingBox = { viewModel.toggleBoundingBox() },
+                onToggleArrow = { viewModel.toggleArrow() },
+                onToggleTelemetryHud = { viewModel.toggleTelemetryHud() },
+                onBack = { viewModel.closeVideoDetails() }
+            )
         }
     }
 }

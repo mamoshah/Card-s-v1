@@ -32,9 +32,9 @@ class ExampleRobolectricTest {
         val middleBox = com.example.model.CardPosition.MIDDLE.getPreconfiguredRect()
         val rightBox = com.example.model.CardPosition.RIGHT.getPreconfiguredRect()
 
-        assertEquals(0.43f, leftBox.centerX, 0.01f)
-        assertEquals(0.57f, middleBox.centerX, 0.01f)
-        assertEquals(0.71f, rightBox.centerX, 0.01f)
+        assertEquals(0.430f, leftBox.centerX, 0.01f)
+        assertEquals(0.575f, middleBox.centerX, 0.01f)
+        assertEquals(0.720f, rightBox.centerX, 0.01f)
 
         assertEquals(0.65f, leftBox.centerY, 0.01f)
         assertEquals(0.65f, middleBox.centerY, 0.01f)
@@ -44,14 +44,14 @@ class ExampleRobolectricTest {
         assertEquals(0.40f, leftBox.height, 0.01f)
 
         // Single tap resolution across the 3 zones
-        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.40f))
-        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.55f))
-        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.72f))
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.430f))
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.575f))
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.720f))
 
         // Direct hit testing on cards and top guidance zones
-        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.findPositionAt(0.42f, 0.60f))
-        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.findPositionAt(0.56f, 0.35f))
-        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.findPositionAt(0.70f, 0.70f))
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.findPositionAt(0.43f, 0.60f))
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.findPositionAt(0.575f, 0.35f))
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.findPositionAt(0.72f, 0.70f))
     }
 
     @Test
@@ -105,7 +105,7 @@ class ExampleRobolectricTest {
         }
 
         // Frame 0: Starts in Middle (Pos 2)
-        tracker.init(makeFrame(0, 0.50f, 0L))
+        tracker.init(makeFrame(0, 0.575f, 0L))
         assertEquals(com.example.model.CardPosition.MIDDLE, tracker.getCurrentPosition())
 
         // Move 1: Card moved [Pos 2 -> Pos 1] at Frame 34 (250ms = 0.25s)
@@ -159,8 +159,8 @@ class ExampleRobolectricTest {
         assertNotNull(targetPos)
 
         val middleBox = targetPos!!.getPreconfiguredRect()
-        assertEquals(0.50f, middleBox.left, 0.01f)
-        assertEquals(0.64f, middleBox.right, 0.01f)
+        assertEquals(0.505f, middleBox.left, 0.01f)
+        assertEquals(0.645f, middleBox.right, 0.01f)
         assertEquals(0.45f, middleBox.top, 0.01f)
         assertEquals(0.85f, middleBox.bottom, 0.01f)
         assertEquals(2, targetPos.id)
@@ -197,8 +197,8 @@ class ExampleRobolectricTest {
         // b) Velocity Arrow Vector Validation at Frame 0: speed < 0.002f -> Arrow Hidden
         assertTrue("Arrow should be hidden when speed < 0.002f", frame0.speed < 0.002f)
 
-        // Frame 30 (1.5s): Card accelerating towards Right (Pos 3) at moderate speed
-        val frame30 = buildFrame(30, 0.63f, 0.020f, 0.020f, 1500L)
+        // Frame 30 (1.5s): Card accelerating towards Right (Pos 3) at moderate speed (still in Middle slot <= 0.58)
+        val frame30 = buildFrame(30, 0.56f, 0.020f, 0.020f, 1500L)
         val moveA = tracker.processFrame(frame30)
         val ratio30 = (frame30.speed / peakSpeed).coerceIn(0f, 1f)
         assertTrue("Ratio at frame 30 should be in medium yellow band (0.28..0.60)", ratio30 in 0.28f..0.60f)
@@ -326,5 +326,90 @@ class ExampleRobolectricTest {
         assertTrue(reportLogs.any { it.contains("Fingerprint Re-Acquisition") && it.contains("Re-acquired at Pos 3") })
         assertTrue(reportLogs.any { it.contains("Occlusion Events Handled: 1 (Fingerprint Re-Acquisitions: 1)") })
         assertTrue(reportLogs.contains("• Final Card Position: Position 3 (Right)"))
+    }
+
+    @Test
+    fun `spatial slot boundaries classify Left under 0_5025, Middle 0_5025 to 0_6475, and Right over 0_6475`() {
+        // Boundary values
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.08f))
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.430f))
+        assertEquals(com.example.model.CardPosition.LEFT, com.example.model.CardPosition.fromX(0.50f))
+
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.5025f))
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.575f))
+        assertEquals(com.example.model.CardPosition.MIDDLE, com.example.model.CardPosition.fromX(0.6475f))
+
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.65f))
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.720f))
+        assertEquals(com.example.model.CardPosition.RIGHT, com.example.model.CardPosition.fromX(0.75f))
+
+        // Hysteresis transitions
+        // 1. Rightward movement past X = 0.6475 from Middle is instantly classified as Right
+        val toRight = com.example.model.CardPosition.transition(com.example.model.CardPosition.MIDDLE, 0.68f)
+        assertEquals(com.example.model.CardPosition.RIGHT, toRight)
+
+        // 2. Rightward movement past X = 0.6475 from Left is instantly classified as Right
+        val leftToRight = com.example.model.CardPosition.transition(com.example.model.CardPosition.LEFT, 0.68f)
+        assertEquals(com.example.model.CardPosition.RIGHT, leftToRight)
+
+        // 3. Movement from Middle to Left when X < 0.495
+        val toLeft = com.example.model.CardPosition.transition(com.example.model.CardPosition.MIDDLE, 0.48f)
+        assertEquals(com.example.model.CardPosition.LEFT, toLeft)
+
+        // 4. Movement from Right returning to Middle when X <= 0.640
+        val backToMiddle = com.example.model.CardPosition.transition(com.example.model.CardPosition.RIGHT, 0.62f)
+        assertEquals(com.example.model.CardPosition.MIDDLE, backToMiddle)
+    }
+
+    @Test
+    fun `card movement tracker logs card 2 final transition to Position 3 Right`() {
+        val tracker = com.example.engine.CardMovementTracker()
+
+        fun makeFrame(index: Int, x: Float, timestampMs: Long): com.example.model.TrackedFrame {
+            val center = com.example.model.NormalizedPoint(x, 0.65f)
+            return com.example.model.TrackedFrame(
+                frameIndex = index,
+                timestampMs = timestampMs,
+                rect = com.example.model.NormalizedRect(x - 0.05f, 0.4f, x + 0.05f, 0.6f),
+                center = center,
+                confidence = 0.95f,
+                trackingState = com.example.model.TrackingState.TRACKING_LOCKED,
+                isOccluded = false,
+                inlierCount = 30,
+                speed = 0.05f
+            )
+        }
+
+        // Starts Middle (Card #2 at 0.575f)
+        tracker.init(makeFrame(0, 0.575f, 0L))
+        assertEquals(com.example.model.CardPosition.MIDDLE, tracker.getCurrentPosition())
+
+        // Move 1: Card #2 moves Middle -> Left (e.g. x = 0.35f at frame 30)
+        val move1 = tracker.processFrame(makeFrame(30, 0.35f, 1000L))
+        assertNotNull(move1)
+        assertEquals(com.example.model.CardPosition.MIDDLE, move1!!.fromPosition)
+        assertEquals(com.example.model.CardPosition.LEFT, move1.toPosition)
+
+        // Move 2: Card #2 moves Left -> Right past 0.6475 (e.g. x = 0.68f at frame 60)
+        val move2 = tracker.processFrame(makeFrame(60, 0.68f, 2000L))
+        assertNotNull(move2)
+        assertEquals(com.example.model.CardPosition.LEFT, move2!!.fromPosition)
+        assertEquals(com.example.model.CardPosition.RIGHT, move2.toPosition)
+
+        // Settles into Position 3 (Right, x = 0.72f)
+        val finalFrame = makeFrame(90, 0.72f, 3000L)
+        tracker.processFrame(finalFrame)
+        tracker.finalizeTracking(finalFrame)
+
+        assertEquals(com.example.model.CardPosition.RIGHT, tracker.getCurrentPosition())
+
+        val report = tracker.generateAiAnalyticalReport(
+            targetCardLabel = "Position 2 (Middle)",
+            totalFrames = 90,
+            totalDurationMs = 3000L,
+            processingFps = 30.0f
+        )
+        assertTrue(report.contains("• Final Card Position: Position 3 (Right)"))
+        assertTrue(report.any { it.contains("Move 2: Pos 1 -> Pos 3") })
     }
 }

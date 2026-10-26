@@ -550,8 +550,9 @@ private fun DrawScope.drawVelocityVector(
 }
 
 /**
- * Large downward green arrow pointing to the detected card with downward Y-Axis Clamp Boundary.
- * Ensures arrow tip NEVER descends below the horizontal green boundary clamp line.
+ * Large downward pointer arrow pointing to the detected card with downward Y-Axis Clamp Boundary.
+ * Ensures arrow tip NEVER descends below the horizontal boundary clamp line.
+ * Renders in RED (Color.Red) whenever the outcome is uncertain, unreliable, or failed.
  */
 private fun DrawScope.drawDownwardGreenArrow(
     frame: TrackedFrame,
@@ -560,8 +561,14 @@ private fun DrawScope.drawDownwardGreenArrow(
     val centerX = fitRect.left + frame.center.x * fitRect.width
     val cardTopY = fitRect.top + frame.rect.top * fitRect.height
 
-    // Y-Axis Clamp Boundary (الخط الأخضر الأفقي المحدد)
-    // The downward boundary prevents the green arrow tip from descending below the boundary line
+    val isFailedOrUnreliable = frame.isUnreliable || frame.confidence < 0.85f ||
+            frame.trackingState == com.example.model.TrackingState.UNRELIABLE ||
+            frame.trackingState == com.example.model.TrackingState.LOST
+
+    val arrowFillColor = if (isFailedOrUnreliable) Color(0xFFFF1744) else Color(0xFF00E676)
+    val boundaryLineColor = if (isFailedOrUnreliable) Color(0x88FF1744) else Color(0x7700E676)
+
+    // Y-Axis Clamp Boundary
     val maxDownwardBoundaryY = fitRect.top + fitRect.height * 0.365f
     val minTopY = fitRect.top + 28.dp.toPx()
 
@@ -577,7 +584,7 @@ private fun DrawScope.drawDownwardGreenArrow(
 
     // Draw subtle horizontal boundary limit line across the tracking corridor
     drawLine(
-        color = Color(0x7700E676),
+        color = boundaryLineColor,
         start = Offset(fitRect.left + 8.dp.toPx(), maxDownwardBoundaryY),
         end = Offset(fitRect.right - 8.dp.toPx(), maxDownwardBoundaryY),
         strokeWidth = 1.5.dp.toPx(),
@@ -602,9 +609,9 @@ private fun DrawScope.drawDownwardGreenArrow(
         style = Stroke(width = 4.dp.toPx(), join = StrokeJoin.Round)
     )
 
-    // Vibrant green fill
+    // Vibrant fill: Red if uncertain/failed, Green if locked/tracking
     drawPath(
         path = arrowPath,
-        color = Color(0xFF00E676)
+        color = arrowFillColor
     )
 }
